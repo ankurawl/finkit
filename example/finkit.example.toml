@@ -1,0 +1,52 @@
+# FinKit Configuration
+# Copy this file to your finance data directory as finkit.toml
+# e.g., cp finkit.example.toml ~/finance/finkit.toml
+
+[general]
+# Path to main ledger file (relative to this config file's directory)
+ledger_path = "main.beancount"
+
+# Where to write fetched Price directives
+prices_path = "prices.beancount"
+
+# Default currency for new accounts
+default_currency = "USD"
+
+# Base directory for all finance data (. = same directory as this config)
+data_dir = "."
+
+[import]
+# Directory to save column mapping profiles (for reusing across imports)
+mappings_dir = "mappings"
+
+# File with merchant → account categorization rules
+rules_file = "rules.json"
+
+# Number of days to check for duplicate transactions during import
+dedup_window_days = 3
+
+[market]
+# How long to cache fetched market prices (in hours)
+cache_ttl_hours = 12
+
+# Price source for stocks and ETFs: "yfinance" or "alpha_vantage"
+stock_source = "yfinance"
+
+# Price source for cryptocurrencies: "coingecko"
+crypto_source = "coingecko"
+
+# Price source for currency exchange rates: "exchangerate-api"
+forex_source = "exchangerate-api"
+
+# File for user-entered prices for unlisted assets (real estate, art, etc.)
+manual_prices_file = "manual_prices.json"
+
+[ollama]
+# Enable LLM-assisted categorization via local Ollama
+enabled = false
+
+# Ollama model to use (must be pulled locally: ollama pull qwen2.5:7b)
+model = "qwen2.5:7b"
+
+# Ollama API endpoint
+base_url = "http://localhost:11434"

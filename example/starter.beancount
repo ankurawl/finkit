@@ -1,0 +1,61 @@
+; Personal Finance Ledger
+; Created by finkit — https://github.com/ankuragwl/finkit
+;
+; This is a Beancount v3 ledger file. Edit freely in any text editor.
+; Lines starting with ; are comments.
+
+option "operating_currency" "USD"
+
+; === Assets ===
+; Bank accounts, brokerages, cash, crypto wallets
+
+2020-01-01 open Assets:Checking           USD
+2020-01-01 open Assets:Savings            USD
+2020-01-01 open Assets:Brokerage          USD  "FIFO"
+2020-01-01 open Assets:Crypto             USD
+
+; === Liabilities ===
+; Credit cards, loans, mortgage
+
+2020-01-01 open Liabilities:CreditCard    USD
+2020-01-01 open Liabilities:Mortgage      USD
+
+; === Income ===
+; Salary, freelance, dividends, interest, capital gains
+
+2020-01-01 open Income:Salary             USD
+2020-01-01 open Income:Freelance          USD
+2020-01-01 open Income:Dividends          USD
+2020-01-01 open Income:Interest           USD
+2020-01-01 open Income:CapitalGains       USD
+
+; === Expenses (common categories) ===
+; Customize these to match your spending patterns
+
+2020-01-01 open Expenses:Food:Groceries   USD
+2020-01-01 open Expenses:Food:DiningOut   USD
+2020-01-01 open Expenses:Food:Coffee      USD
+2020-01-01 open Expenses:Housing:Rent     USD
+2020-01-01 open Expenses:Housing:Utilities USD
+2020-01-01 open Expenses:Transport:Gas    USD
+2020-01-01 open Expenses:Transport:Public USD
+2020-01-01 open Expenses:Transport:Rideshare USD
+2020-01-01 open Expenses:Health:Insurance USD
+2020-01-01 open Expenses:Health:Medical   USD
+2020-01-01 open Expenses:Shopping:Clothing USD
+2020-01-01 open Expenses:Shopping:Electronics USD
+2020-01-01 open Expenses:Entertainment   USD
+2020-01-01 open Expenses:Subscriptions   USD
+2020-01-01 open Expenses:Travel          USD
+2020-01-01 open Expenses:Education       USD
+2020-01-01 open Expenses:Gifts          USD
+2020-01-01 open Expenses:Taxes:Federal   USD
+2020-01-01 open Expenses:Taxes:State     USD
+2020-01-01 open Expenses:Taxes:FICA      USD
+2020-01-01 open Expenses:Other           USD
+
+; === Equity ===
+; Opening balances and retained earnings
+
+2020-01-01 open Equity:Opening-Balances   USD
+2020-01-01 open Equity:Retained-Earnings  USD

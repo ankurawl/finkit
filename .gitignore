@@ -1,0 +1,48 @@
+# Finance data (never commit personal data)
+~/finance/
+*.beancount
+!example/starter.beancount
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cache
+*.db
+.cache/
+
+# Test / coverage
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Import mappings and rules (user-specific)
+mappings/
+rules.json
+manual_prices.json
+finkit.toml
