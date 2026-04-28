@@ -22,10 +22,11 @@ def categorize_with_llm(
         return [{"description": d, "suggestion": None, "reason": "Ollama not enabled"} for d in descriptions]
 
     try:
-        import ollama as ollama_client
+        from ollama import Client
     except ImportError:
         return [{"description": d, "suggestion": None, "reason": "ollama package not installed"} for d in descriptions]
 
+    client = Client(host=config.ollama.base_url)
     accounts_str = "\n".join(available_accounts)
     results = []
 
@@ -39,7 +40,7 @@ def categorize_with_llm(
         )
 
         try:
-            response = ollama_client.chat(
+            response = client.chat(
                 model=config.ollama.model,
                 messages=[{"role": "user", "content": prompt}],
                 options={"temperature": 0.1},

@@ -181,6 +181,11 @@ def cmd_export(args: argparse.Namespace) -> None:
     _print_result(result)
 
 
+def cmd_agent(args: argparse.Namespace) -> None:
+    from personalfinance.agent import run
+    run()
+
+
 def cmd_categorize(args: argparse.Namespace) -> None:
     from personalfinance.categorize.rules import apply_rules, review_uncategorized
     if args.review:
@@ -315,6 +320,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--format", default="csv", choices=["csv", "json"])
     p.add_argument("--output", help="Output file path")
     p.set_defaults(func=cmd_export)
+
+    # agent
+    p = sub.add_parser("agent", help="Interactive agent using local Ollama (fully offline)")
+    p.set_defaults(func=cmd_agent)
 
     # categorize
     p = sub.add_parser("categorize", help="Categorize transactions")
