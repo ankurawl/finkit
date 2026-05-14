@@ -73,6 +73,7 @@ Submit a new double-entry transaction. All postings must sum to zero (within cur
 | `narration` | str | no | null | Transaction description |
 | `tags` | list[str] | no | null | Tags for categorization |
 | `status` | str | no | cleared | pending, cleared, or reconciled |
+| `source_file_id` | int | no | null | Link to source document from ingest_document. Enables undo_import. |
 
 **Posting object fields**:
 | Field | Type | Required | Description |
@@ -582,6 +583,145 @@ finkit import-dir ~/Downloads/chase-statements/ Assets:Chase:Checking \
 ```
 
 **Output**: `{"imported_files": 5, "skipped_files": 2, "total_transactions": 234}`
+
+---
+
+## 21. ingest_document
+
+Archive any financial document, extract its content, classify the document type, and return extracted text with structured hints for LLM interpretation. Does not create transactions.
+
+**MCP**: `ingest_document(file_path, password?, institution?)`
+**CLI**: (MCP only --- designed for LLM interaction)
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `file_path` | str | yes | | Path to any financial document (PDF, CSV, XLSX) |
+| `password` | str | no | null | Password for encrypted PDFs |
+| `institution` | str | no | null | Institution name override for classification |
+
+Archives the file (copy + SHA-256 dedup), extracts text (PDF) or rows (CSV/XLSX), classifies the document type, and returns everything to the LLM. Use `submit_transaction` or `submit_transactions` with the returned `source_file_id` to create transactions.
+
+**Example flow**:
+1. `ingest_document("~/Downloads/payslip-jan-2025.pdf")` --- returns extracted text + document_type="payslip" + hints
+2. LLM interprets the content using extraction hints
+3. `submit_transactions([...], source_file_id=3)` --- creates transactions linked to the document
+
+**Output**: `{"source_file_id": 3, "is_new": true, "file_type": "pdf", "document_type": "payslip", "confidence": "high", "text": "...", "extraction_hints": {...}, "existing_accounts": [...]}`
+
+**Errors**:
+- File not found
+- Duplicate file (returns `is_new: false`)
+
+---
+
+## 22. submit_transactions
+
+Submit multiple transactions atomically. All succeed or all fail.
+
+**MCP**: `submit_transactions(transactions, source_file_id?)`
+**CLI**: (MCP only)
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `transactions` | list[dict] | yes | | List of transaction dicts, each with date, postings, and optional payee, narration, tags, status |
+| `source_file_id` | int | no | null | Shared source document ID from ingest_document |
+
+More efficient than calling submit_transaction repeatedly. Single database transaction, single summary refresh. All transactions are linked to the same source_file_id for undo_import support.
+
+**Example**:
+```json
+{
+  "transactions": [
+    {
+      "date": "2025-01-15",
+      "payee": "Employer",
+      "narration": "January salary",
+      "postings": [
+        {"account": "Income:Salary:Acme", "amount": "-5000.00", "currency": "USD"},
+        {"account": "Assets:Chase:Checking", "amount": "5000.00", "currency": "USD"}
+      ]
+    },
+    {
+      "date": "2025-01-15",
+      "payee": "IRS",
+      "narration": "Federal tax withholding",
+      "postings": [
+        {"account": "Assets:Chase:Checking", "amount": "-750.00", "currency": "USD"},
+        {"account": "Expenses:Taxes:Federal", "amount": "750.00", "currency": "USD"}
+      ]
+    }
+  ],
+  "source_file_id": 3
+}
+```
+
+**Output**: `{"uuids": ["a1b2c3d4", "e5f6a7b8"], "count": 2, "source_file_id": 3}`
+
+**Errors**:
+- Any transaction unbalanced --- entire batch rolls back
+- Invalid source_file_id
+
+---
+
+## 23. setup_payroll_accounts
+
+Create the standard payroll account hierarchy for an employer.
+
+**MCP**: `setup_payroll_accounts(employer, jurisdiction?)`
+**CLI**: (MCP only)
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `employer` | str | yes | | Employer name (e.g., "Acme") |
+| `jurisdiction` | str | no | US | Tax jurisdiction: US or IN |
+
+Idempotent --- skips accounts that already exist. Creates Income:Salary:{Employer}, Expenses:Taxes:\*, Expenses:Benefits:\*, and Assets:Retirement:\* accounts.
+
+**Example**: `setup_payroll_accounts("Acme", jurisdiction="US")`
+
+**Output**: `{"gross": "Income:Salary:Acme", "federal_tax": "Expenses:Taxes:Federal", ...}`
+
+---
+
+## 24. reconcile_tax_document
+
+Compare tax form data against recorded transactions.
+
+**MCP**: `reconcile_tax_document(form_type, year, fields)`
+**CLI**: (MCP only)
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `form_type` | str | yes | | Tax form: w2, 1099_int, 1099_div, 1099_b, form16 |
+| `year` | int | yes | | Tax year |
+| `fields` | dict | yes | | Key-value pairs from the tax form (amounts as decimal strings) |
+
+Returns field-by-field comparison with match/mismatch/missing status. For missing income (e.g., interest from 1099-INT not in ledger), generates suggested transactions.
+
+**Example**:
+```bash
+reconcile_tax_document("w2", 2024, {"wages": "60000.00", "federal_tax": "9000.00"})
+```
+
+**Output**: comparisons array with status per field, missing_income array, summary counts.
+
+---
+
+## 25. tax_readiness_report
+
+Generate a tax readiness report for a given year.
+
+**MCP**: `tax_readiness_report(year?, jurisdiction?)`
+**CLI**: (MCP only)
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `year` | int | no | previous year | Tax year |
+| `jurisdiction` | str | no | US | Tax jurisdiction: US or IN |
+
+Queries the entire ledger to build a comprehensive picture of captured income, taxes paid, capital gains, and deductible expenses. Flags gaps like missing pay periods.
+
+**Output**: income breakdown, taxes_paid, capital_gains, deductible_expenses, gaps list.
 
 ---
 

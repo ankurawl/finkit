@@ -66,8 +66,19 @@ Living document tracking what's built, what's rough, and what could come next.
 ### MCP Server
 
 - **20 tools** exposed via FastMCP: init_ledger, open_account, submit_transaction, amend_transaction, assert_balance, query, get_balances, get_transactions, import_file, import_pdf, import_directory, fetch_prices, analyze_spending, analyze_portfolio, report_capital_gains, what_if_sell, export, categorize, corporate_action, undo_import.
+- **5 additional tools** for document ingestion and tax workflows: ingest_document, submit_transactions, setup_payroll_accounts, reconcile_tax_document, tax_readiness_report.
+- **25 tools total** exposed via FastMCP.
 - **Auto-config** via `.mcp.json` at the project root -- MCP-compatible clients pick up the server automatically.
 - **Read-only query safety** -- the `query` tool enforces `PRAGMA query_only = ON` before executing user SQL.
+
+### Document Ingestion and Financial Planning
+
+- **LLM-powered document ingestion** -- `ingest_document` archives any financial document (PDF, CSV, XLSX), extracts content via pdfplumber or CSV parsing, classifies the document type using keyword matching against 15 types (payslip, tax forms, receipts, invoices, etc.), and returns extracted text with type-specific hints for LLM interpretation.
+- **Batch transaction submission** -- `submit_transactions` commits multiple transactions atomically with a shared `source_file_id`. Single database transaction and summary refresh. Supports `undo_import` for the entire batch.
+- **Document provenance** -- `submit_transaction` now accepts optional `source_file_id` to link manually-created transactions to source documents, enabling `undo_import`.
+- **Payslip decomposition** -- `setup_payroll_accounts` creates the standard payroll account hierarchy per employer (US and India jurisdictions). Payslips decompose into multi-posting transactions: gross pay, federal/state taxes, FICA, benefits, retirement contributions, net pay.
+- **Tax document reconciliation** -- `reconcile_tax_document` compares W-2, 1099-INT, 1099-DIV, 1099-B, and Form 16 data against recorded transactions. Returns field-by-field comparisons with match/mismatch/missing status and suggested transactions for missing income.
+- **Tax readiness report** -- `tax_readiness_report` generates a comprehensive gap analysis for a tax year: income totals, taxes paid, capital gains, deductible expenses, and missing pay period detection.
 
 ### CLI
 
@@ -122,6 +133,8 @@ Living document tracking what's built, what's rough, and what could come next.
 - India brokerage import: Zerodha contract notes, Groww, Kite CSV [medium]
 - Auto-detect column mappings from CSV headers using heuristics [medium]
 - Interactive mapping builder -- prompt user to assign columns when headers don't match [medium]
+- Direct bank feeds via Plaid (US) and Account Aggregator (India) for fully automated transaction import [large]
+- OCR for scanned documents and photos (receipts, paper pay stubs) via Tesseract or cloud OCR [medium]
 
 ### Categorization
 
@@ -180,4 +193,4 @@ Living document tracking what's built, what's rough, and what could come next.
 
 ---
 
-*Last updated: 2026-05-13*
+*Last updated: 2026-05-14*

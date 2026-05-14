@@ -35,7 +35,7 @@ Living architecture document for FinKit. For schema details see [schema_referenc
                  +-------v--------+
                  |   MCP Server   |
                  | (mcp/server.py)|
-                 |   20 tools     |
+                 |   25 tools     |
                  +-------+--------+
                          |
           +--------------+----------------+
@@ -135,7 +135,7 @@ with db.transaction():
     # If anything fails, the entire transaction rolls back
 ```
 
-Write operations: `submit_transaction`, `amend_transaction`, `import_file`, `undo_import`, `corporate_action`, `fetch_prices`.
+Write operations: `submit_transaction`, `submit_transactions`, `amend_transaction`, `import_file`, `undo_import`, `corporate_action`, `fetch_prices`.
 
 ---
 
@@ -217,6 +217,62 @@ Each parser returns `list[dict]` with keys: `date` (YYYY-MM-DD), `payee`, `narra
 Two layers of deduplication:
 1. **File-level**: SHA-256 hash of file contents. Re-importing the same file is a no-op.
 2. **Transaction-level**: Within a configurable window (default 3 days), transactions with the same amount and normalized payee against the same account are considered duplicates.
+
+---
+
+### LLM-Assisted Import Pipeline
+
+For documents without a deterministic parser (payslips, tax returns, receipts, invoices, etc.), FinKit uses a two-phase import architecture:
+
+```
+file_path
+  |
+  v
+ingest_document()              Phase 1: deterministic (FinKit)
+  |  archive + extract + classify + return hints
+  v
+LLM interprets content         Phase 2: semantic (MCP client)
+  |  reads text, understands document, builds transactions
+  v
+submit_transactions()          Batch commit with source_file_id linkage
+  |
+  v
+undo_import()                  Reverses everything via source_file_id
+```
+
+**Phase 1 (FinKit):** `ingest_document` archives the file (SHA-256 dedup), extracts text via pdfplumber (for PDFs) or row parsing (for CSV/XLSX), classifies the document type using keyword matching against 15 document types, and returns the extracted content with type-specific hints.
+
+**Phase 2 (LLM):** The calling LLM reads the extracted text, uses the hints to understand what fields to look for, and calls `submit_transactions` with properly structured double-entry postings. The `source_file_id` from Phase 1 links all created transactions back to the source document.
+
+Document types detected: payslip, tax_w2, tax_1099, tax_form16, receipt, invoice, insurance_statement, loan_statement, mortgage_statement, bank_statement, credit_card_statement, brokerage_statement, utility_bill, property_tax, unknown.
+
+### Payslip Decomposition
+
+Payslips are decomposed into multi-posting double-entry transactions:
+
+```
+Income:Salary:Acme            -5000.00 USD   (gross pay)
+Expenses:Taxes:Federal          750.00 USD   (federal withholding)
+Expenses:Taxes:State            250.00 USD   (state tax)
+Expenses:Taxes:SocialSecurity   310.00 USD   (Social Security)
+Expenses:Taxes:Medicare          72.50 USD   (Medicare)
+Expenses:Benefits:Health        200.00 USD   (health insurance)
+Assets:Retirement:401k         500.00 USD   (401k contribution)
+Assets:Chase:Checking         2917.50 USD   (net pay)
+```
+
+`setup_payroll_accounts` creates the standard account hierarchy per employer (US and India jurisdictions supported).
+
+### Tax Document Reconciliation
+
+Tax forms (W-2, 1099, Form 16) are reconciled against the ledger rather than imported as transactions:
+
+- **W-2**: Compare wages, federal/state tax, SS/Medicare against `Income:Salary:*` and `Expenses:Taxes:*` totals
+- **1099-INT/DIV**: Compare interest/dividend income. Generate suggested transactions for missing income
+- **1099-B**: Compare capital gains against `s_yearly_capital_gains` summary
+- **Form 16**: India equivalent --- compare gross salary and TDS
+
+`tax_readiness_report` provides a comprehensive gap analysis for a tax year.
 
 ---
 

@@ -5,6 +5,23 @@ All notable changes to FinKit are documented here.
 ## [Unreleased]
 
 ### Added
+- **LLM-powered document ingestion** — new `ingest_document` MCP tool archives any
+  financial document, extracts content, classifies document type (15 types including
+  payslip, tax forms, receipts), and returns structured hints for LLM interpretation.
+- **Batch transaction submission** — new `submit_transactions` MCP tool commits
+  multiple transactions atomically with shared source file linkage.
+- **Document provenance** — `submit_transaction` now accepts `source_file_id` to
+  link transactions to source documents, enabling bulk undo via `undo_import`.
+- **Payslip decomposition** — new `setup_payroll_accounts` MCP tool creates the
+  standard payroll account hierarchy (US and India). Payslips decompose into
+  balanced multi-posting transactions covering gross pay, taxes, benefits, and net pay.
+- **Tax document reconciliation** — new `reconcile_tax_document` MCP tool compares
+  W-2, 1099-INT/DIV/B, and Form 16 data against the ledger. Returns field-by-field
+  comparisons and suggested transactions for missing income.
+- **Tax readiness report** — new `tax_readiness_report` MCP tool generates a
+  comprehensive gap analysis for any tax year.
+- **Document type classifier** (`src/finkit/importers/document_classifier.py`) —
+  keyword-based classification of 15 financial document types with extraction hints.
 - **PDF statement import** — `import_file` now accepts PDF files alongside CSV/XLSX.
   Institution-specific text parsers extract transactions from PDF statements
   using pdfplumber for text extraction and regex-based parsing.

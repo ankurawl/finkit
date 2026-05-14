@@ -6,7 +6,7 @@ MCP tools. See `README.md` for features and installation.
 ## Use MCP tools, not CLI
 
 The MCP server is auto-configured via `.mcp.json`. Prefer MCP tools over
-running CLI commands via Bash. See `docs/tools_reference.md` for all 20 tools.
+running CLI commands via Bash. See `docs/tools_reference.md` for all 25 tools.
 
 ## Documentation map
 
@@ -15,7 +15,7 @@ running CLI commands via Bash. See `docs/tools_reference.md` for all 20 tools.
 | `README.md` | Features, installation, quick start, configuration |
 | `docs/architecture.md` | System design, data flow, import pipeline, lot tracking |
 | `docs/schema_reference.md` | All database tables with column definitions and example queries |
-| `docs/tools_reference.md` | All 20 MCP tools and CLI commands with parameters and examples |
+| `docs/tools_reference.md` | All 25 MCP tools and CLI commands with parameters and examples |
 | `docs/roadmap.md` | Completed features, known limitations, future ideas |
 | `CONTRIBUTING.md` | Code conventions, how to add importers/tools/summaries |
 | `example/quickstart.md` | Step-by-step walkthrough from install to portfolio analysis |
@@ -49,3 +49,18 @@ These rules prevent data corruption. Violating them causes silent bugs.
 ```bash
 python -m pytest tests/ -v
 ```
+
+## LLM-assisted document import workflow
+
+For documents without a built-in parser (payslips, tax forms, receipts, etc.):
+
+1. `ingest_document(file_path)` — archives file, extracts text, classifies type, returns hints
+2. LLM interprets the extracted content using the type-specific hints
+3. `submit_transactions(transactions, source_file_id=N)` — batch-commits with provenance
+4. `undo_import(source_file_id=N)` — reverses everything if needed
+
+For payslips specifically: call `setup_payroll_accounts(employer)` first to create
+the account hierarchy, then use `submit_transactions` with the payslip line items.
+
+For tax documents: call `reconcile_tax_document(form_type, year, fields)` to compare
+form data against the ledger. Use `tax_readiness_report(year)` for gap analysis.
