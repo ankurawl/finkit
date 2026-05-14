@@ -84,6 +84,20 @@ finkit import ~/Downloads/chase-checking-jan-2025.csv Assets:Chase:Checking \
 
 On first import for an institution, FinKit detects column structure and saves the mapping for reuse. The file is copied into `~/finance/statements/2025/` and SHA-256 is recorded for dedup. Importing the same file again is a no-op.
 
+## 4b. Import a PDF Statement
+
+FinKit can also import PDF statements directly. Institution-specific parsers extract transactions from the PDF text.
+
+```bash
+# PDF import with auto-detected institution
+finkit import ~/Downloads/chase-freedom-jan-2026.pdf Liabilities:Chase:Freedom --institution chase
+
+# The institution can often be auto-detected from the PDF content
+finkit import ~/Downloads/marcus-savings-dec-2025.pdf Assets:Marcus:Savings
+```
+
+Supported PDF institutions: Chase (credit cards), Capital One, Citi, Marcus (Goldman Sachs), Alliant Credit Union, FirstTech Federal, Frost Bank, and Fidelity (investment accounts).
+
 Output:
 ```json
 {
@@ -237,6 +251,7 @@ If there's a mismatch, the assertion is still recorded for audit purposes. The d
 
 ## Next Steps
 
+- Read the [Architecture](../docs/architecture.md) for design decisions and data flow
 - Read the [Tools Reference](../docs/tools_reference.md) for detailed parameter documentation
 - Read the [Schema Reference](../docs/schema_reference.md) for database table layouts
 - Set up the MCP server (`python -m finkit.mcp.server`) for LLM-driven interaction

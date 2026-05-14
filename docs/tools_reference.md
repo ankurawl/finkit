@@ -158,12 +158,12 @@ finkit amend a3f1b2c4 --delete
 
 Verify that an account has the expected balance on a given date.
 
-**MCP**: `assert_balance(account, date, expected_amount, currency?)`
+**MCP**: `assert_balance(account_name, date, expected_amount, currency?)`
 **CLI**: `finkit assert-balance ACCOUNT DATE AMOUNT [--currency CUR]`
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `account` | str | yes | | Account name |
+| `account_name` | str | yes | | Account name |
 | `date` | str | yes | | YYYY-MM-DD |
 | `expected_amount` | str | yes | | Expected balance as decimal string |
 | `currency` | str | no | USD | Currency of the expected balance |
@@ -192,13 +192,12 @@ finkit assert-balance Assets:Chase:Checking 2025-01-31 4523.47
 
 Run an ad-hoc read-only SQL query against the database.
 
-**MCP**: `query(sql, params?)`
+**MCP**: `query(sql)`
 **CLI**: `finkit query SQL`
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `sql` | str | yes | | SQL SELECT statement |
-| `params` | list or dict | no | null | Query parameters for parameterized queries |
 
 The tool enforces `PRAGMA query_only = ON` before executing. INSERT, UPDATE, DELETE, and DDL statements are rejected.
 
@@ -220,12 +219,12 @@ finkit query "SELECT year_month, total FROM s_monthly_spending WHERE account_id 
 
 Get current balances for accounts, reading from `s_daily_balances`.
 
-**MCP**: `get_balances(account?, account_type?, as_of_date?)`
+**MCP**: `get_balances(account_name?, account_type?, as_of_date?)`
 **CLI**: `finkit balances [--account NAME] [--type TYPE] [--as-of DATE]`
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `account` | str | no | null | Filter by account name (fuzzy match) |
+| `account_name` | str | no | null | Filter by account name (fuzzy match) |
 | `account_type` | str | no | null | Filter by type: Assets, Liabilities, etc. |
 | `as_of_date` | str | no | today | Balance as of this date (YYYY-MM-DD) |
 
@@ -243,7 +242,7 @@ finkit balances --account Chase --as-of 2025-01-31
 
 Search and retrieve transactions with optional filters.
 
-**MCP**: `get_transactions(date_from?, date_to?, payee?, account?, tags?, amount_min?, amount_max?, uuid?, status?, limit?)`
+**MCP**: `get_transactions(date_from?, date_to?, payee?, account_name?, tags?, amount_min?, amount_max?, uuid?, status?, limit?)`
 **CLI**: `finkit transactions [options]`
 
 | Parameter | Type | Required | Default | Description |
@@ -251,7 +250,7 @@ Search and retrieve transactions with optional filters.
 | `date_from` | str | no | null | Start date (YYYY-MM-DD) |
 | `date_to` | str | no | null | End date (YYYY-MM-DD) |
 | `payee` | str | no | null | Filter by payee (fuzzy match) |
-| `account` | str | no | null | Filter by account name |
+| `account_name` | str | no | null | Filter by account name |
 | `tags` | list[str] | no | null | Filter by tags |
 | `amount_min` | str | no | null | Minimum posting amount |
 | `amount_max` | str | no | null | Maximum posting amount |
@@ -272,23 +271,24 @@ finkit transactions --uuid a3f1b2c4
 
 ## 9. import_file
 
-Import transactions from a CSV or XLSX file into the ledger.
+Import transactions from a CSV, XLSX, or PDF file into the ledger.
 
-**MCP**: `import_file(file_path, account, mapping_name?, institution?)`
+**MCP**: `import_file(file_path, account_name, mapping_name?, institution?)`
 **CLI**: `finkit import FILE_PATH ACCOUNT [--mapping NAME] [--institution NAME]`
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `file_path` | str | yes | | Path to CSV/XLSX file |
-| `account` | str | yes | | Target account name |
-| `mapping_name` | str | no | null | Saved column mapping name to use |
-| `institution` | str | no | null | Financial institution (e.g. chase, hdfc) |
+| `file_path` | str | yes | | Path to CSV, XLSX, or PDF file |
+| `account_name` | str | yes | | Target account name |
+| `mapping_name` | str | no | null | Saved column mapping name to use (CSV/XLSX only) |
+| `institution` | str | no | null | Financial institution (e.g. chase, hdfc). For PDFs, the institution is auto-detected from file content when not specified |
 
-The file is copied to `~/finance/statements/{year}/`. SHA-256 ensures re-importing the same file is a no-op. All original fields are preserved in `raw_extractions`. Categorization rules are applied automatically.
+The file is copied to `~/finance/statements/{year}/`. SHA-256 ensures re-importing the same file is a no-op. All original fields are preserved in `raw_extractions`. Categorization rules are applied automatically. For PDF files, institution-specific parsers extract transactions directly from the statement text.
 
 **Example**:
 ```bash
 finkit import ~/Downloads/chase-jan-2025.csv Assets:Chase:Checking --institution chase
+finkit import ~/Downloads/hdfc-statement.pdf Assets:HDFC:Savings
 ```
 
 **Output**: `{"imported": 47, "skipped_duplicates": 3, "source_file_id": 1}`
@@ -302,7 +302,7 @@ finkit import ~/Downloads/chase-jan-2025.csv Assets:Chase:Checking --institution
 
 ## 10. import_pdf
 
-Extract tabular data from a PDF bank or brokerage statement.
+Extract raw text and tables from a PDF bank or brokerage statement. This is an extraction-only tool that returns unprocessed content; it does not create transactions in the ledger. For full PDF import with transaction creation, use `import_file` instead.
 
 **MCP**: `import_pdf(file_path, password?)`
 **CLI**: `finkit import-pdf FILE_PATH [--password PW]`
@@ -312,7 +312,7 @@ Extract tabular data from a PDF bank or brokerage statement.
 | `file_path` | str | yes | | Path to the PDF file |
 | `password` | str | no | null | Password for encrypted PDFs |
 
-Returns structured table data for further processing. With an LLM client, the data can be interpreted and fed into `import_file`. Without an LLM, tables are returned as CSV-formatted text.
+Returns raw text and structured table data for inspection or further processing. With an LLM client, the data can be interpreted and fed into `submit_transaction`. For automated PDF-to-transaction import, use `import_file` with a PDF path instead.
 
 **Example**:
 ```bash
@@ -430,12 +430,12 @@ finkit capital-gains --year 2024 --currency USD
 
 Read-only simulation of selling a position. Does not modify any data.
 
-**MCP**: `what_if_sell(account, commodity, quantity, booking_method?, sell_price?)`
+**MCP**: `what_if_sell(account_name, commodity, quantity, booking_method?, sell_price?)`
 **CLI**: `finkit what-if ACCOUNT COMMODITY QUANTITY [--method METHOD] [--price PRICE]`
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `account` | str | yes | | Investment account name |
+| `account_name` | str | yes | | Investment account name |
 | `commodity` | str | yes | | Ticker/symbol to simulate selling |
 | `quantity` | str | yes | | Number of units to sell |
 | `booking_method` | str | no | FIFO | Lot selection: FIFO, LIFO, HIFO |
@@ -561,13 +561,13 @@ finkit undo-import 3
 
 Batch import all matching files from a directory tree.
 
-**MCP**: `import_directory(source_dir, account, institution?, glob_pattern?, recursive?, mapping_name?)`
+**MCP**: `import_directory(source_dir, account_name, institution?, glob_pattern?, recursive?, mapping_name?)`
 **CLI**: `finkit import-dir SOURCE_DIR ACCOUNT [options]`
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `source_dir` | str | yes | | Path to the source directory |
-| `account` | str | yes | | Target account for all files |
+| `account_name` | str | yes | | Target account for all files |
 | `institution` | str | no | null | Financial institution |
 | `glob_pattern` | str | no | *.csv | File pattern to match |
 | `recursive` | bool | no | true | Whether to search subdirectories |

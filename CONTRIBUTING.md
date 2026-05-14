@@ -5,7 +5,7 @@
 ```bash
 # Clone the repository
 git clone https://github.com/your-org/finkit.git
-cd finkit/finkit
+cd finkit
 
 # Create a virtual environment
 python -m venv .venv
@@ -105,15 +105,24 @@ If summary refresh fails, the entire operation rolls back. No partial state is a
 
 ## Adding a New Importer
 
-### Supporting a new institution
+### Supporting a new institution (CSV/XLSX)
 
-1. Add a column mapping entry as JSON per the Column Mapping Schema in `plan2.md`. The mapping specifies which CSV columns correspond to date, payee, amount, etc.
+1. Add a column mapping entry as JSON. The mapping specifies which CSV columns correspond to date, payee, amount, etc.
 2. Add categorization rules for common payee patterns from that institution.
 3. Test with a sample file. Verify:
    - All original fields are preserved in `raw_extractions`
    - SHA-256 dedup works (re-importing is a no-op)
    - Categorization rules are applied
    - Summaries are refreshed atomically
+
+### Adding a new PDF institution parser
+
+1. Add a parser function in `importers/pdf_parsers.py`.
+2. Register it in the `PARSERS` dict with the institution slug.
+3. Add detection keywords to `_INSTITUTION_KEYWORDS` for auto-detection.
+4. The parser takes `(text: str, filename: str)` and returns `list[dict]` with
+   keys: `date` (YYYY-MM-DD), `payee`, `narration`, `amount` (string, negative=debit).
+5. Add tests in `tests/test_pdf_parsers.py` with sample text from the institution.
 
 ### Supporting a new file format
 

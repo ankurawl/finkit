@@ -33,3 +33,7 @@ finkit.toml
 *.swp
 *.swo
 .DS_Store
+
+# Claude Code — user-specific, don't commit
+.claude/settings.local.json
+.claude/internet-mode-*

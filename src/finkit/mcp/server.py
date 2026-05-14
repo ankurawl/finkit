@@ -115,7 +115,7 @@ def amend_transaction(
 
 @mcp.tool()
 def assert_balance(
-    account: Annotated[str, "Account name to check"],
+    account_name: Annotated[str, "Account name to check"],
     date: Annotated[str, "Date to check balance as of (YYYY-MM-DD)"],
     expected_amount: Annotated[str, "Expected balance amount as a decimal string"],
     currency: Annotated[str, "Currency of the expected balance"] = "USD",
@@ -127,7 +127,7 @@ def assert_balance(
         db = _get_db()
         return _assert_balance(
             db,
-            account=account,
+            account_name=account_name,
             date=date,
             expected_amount=expected_amount,
             currency=currency,
@@ -139,21 +139,20 @@ def assert_balance(
 @mcp.tool()
 def query(
     sql: Annotated[str, "SQL query to execute (read-only, SELECT statements only)"],
-    params: Annotated[list | dict | None, "Query parameters for parameterized queries"] = None,
 ) -> list[dict] | dict:
     """Run an ad-hoc read-only SQL query against the database."""
     try:
         from finkit.queries import run_query
 
         db = _get_db()
-        return run_query(db, sql=sql, params=params)
+        return run_query(db, sql=sql)
     except Exception as e:
         return {"error": str(e)}
 
 
 @mcp.tool()
 def get_balances(
-    account: Annotated[str | None, "Filter by account name (fuzzy match)"] = None,
+    account_name: Annotated[str | None, "Filter by account name (fuzzy match)"] = None,
     account_type: Annotated[str | None, "Filter by account type: Assets, Liabilities, etc."] = None,
     as_of_date: Annotated[str | None, "Balance as of this date (YYYY-MM-DD), defaults to today"] = None,
 ) -> list[dict] | dict:
@@ -162,7 +161,7 @@ def get_balances(
         from finkit.queries import get_balances as _get_balances
 
         db = _get_db()
-        return _get_balances(db, account=account, account_type=account_type, as_of_date=as_of_date)
+        return _get_balances(db, account_name=account_name, account_type=account_type, as_of_date=as_of_date)
     except Exception as e:
         return {"error": str(e)}
 
@@ -172,7 +171,7 @@ def get_transactions(
     date_from: Annotated[str | None, "Start date filter (YYYY-MM-DD)"] = None,
     date_to: Annotated[str | None, "End date filter (YYYY-MM-DD)"] = None,
     payee: Annotated[str | None, "Filter by payee name (fuzzy match)"] = None,
-    account: Annotated[str | None, "Filter by account name"] = None,
+    account_name: Annotated[str | None, "Filter by account name"] = None,
     tags: Annotated[list[str] | None, "Filter by tags"] = None,
     amount_min: Annotated[str | None, "Minimum posting amount filter"] = None,
     amount_max: Annotated[str | None, "Maximum posting amount filter"] = None,
@@ -190,7 +189,7 @@ def get_transactions(
             date_from=date_from,
             date_to=date_to,
             payee=payee,
-            account=account,
+            account_name=account_name,
             tags=tags,
             amount_min=amount_min,
             amount_max=amount_max,
@@ -204,12 +203,12 @@ def get_transactions(
 
 @mcp.tool()
 def import_file(
-    file_path: Annotated[str, "Path to the CSV/XLSX file to import"],
-    account: Annotated[str, "Target account for imported transactions"],
+    file_path: Annotated[str, "Path to the CSV, XLSX, or PDF file to import"],
+    account_name: Annotated[str, "Target account for imported transactions"],
     mapping_name: Annotated[str | None, "Name of a saved column mapping to use"] = None,
     institution: Annotated[str | None, "Financial institution (e.g. chase, schwab)"] = None,
 ) -> dict:
-    """Import transactions from a CSV or XLSX file into the ledger."""
+    """Import transactions from a CSV, XLSX, or PDF file into the ledger."""
     try:
         from finkit.importers.file_importer import import_file as _import_file
 
@@ -219,7 +218,7 @@ def import_file(
             db,
             settings=settings,
             file_path=file_path,
-            account=account,
+            account_name=account_name,
             mapping_name=mapping_name,
             institution=institution,
         )
@@ -232,7 +231,7 @@ def import_pdf(
     file_path: Annotated[str, "Path to the PDF statement to extract tables from"],
     password: Annotated[str | None, "Password for encrypted PDF files"] = None,
 ) -> dict:
-    """Extract tabular data from a PDF bank/brokerage statement."""
+    """Extract raw text and tables from a PDF statement. For extraction only — use import_file to create transactions."""
     try:
         from finkit.importers.pdf_extractor import extract_pdf
 
@@ -320,7 +319,7 @@ def report_capital_gains(
 
 @mcp.tool()
 def what_if_sell(
-    account: Annotated[str, "Investment account holding the commodity"],
+    account_name: Annotated[str, "Investment account holding the commodity"],
     commodity: Annotated[str, "Ticker/symbol to simulate selling"],
     quantity: Annotated[str, "Number of units to sell (decimal string)"],
     booking_method: Annotated[str, "Lot selection method: FIFO, LIFO, or HIFO"] = "FIFO",
@@ -335,7 +334,7 @@ def what_if_sell(
         return _what_if_sell(
             db,
             settings=settings,
-            account=account,
+            account_name=account_name,
             commodity=commodity,
             quantity=quantity,
             booking_method=booking_method,
@@ -438,7 +437,7 @@ def undo_import(
 @mcp.tool()
 def import_directory(
     source_dir: Annotated[str, "Path to the directory containing statement files"],
-    account: Annotated[str, "Target account for all imported transactions"],
+    account_name: Annotated[str, "Target account for all imported transactions"],
     institution: Annotated[str | None, "Financial institution for all files in the directory"] = None,
     glob_pattern: Annotated[str, "File pattern to match"] = "*.csv",
     recursive: Annotated[bool, "Whether to search subdirectories"] = True,
@@ -454,7 +453,7 @@ def import_directory(
             db,
             settings=settings,
             source_dir=source_dir,
-            account=account,
+            account_name=account_name,
             institution=institution,
             glob_pattern=glob_pattern,
             recursive=recursive,

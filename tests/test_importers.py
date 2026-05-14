@@ -248,6 +248,47 @@ class TestDedupOnReimport:
         assert result2["imported"] == 0
 
 
+class TestDedupNormalizesWhitespace:
+    def test_dedup_matches_despite_extra_spaces(self, ledger_db, settings):
+        from finkit.models import Posting, Transaction
+
+        open_account(
+            ledger_db, "Assets:Bank:Checking", "Assets",
+            currency="USD",
+        )
+        open_account(
+            ledger_db, "Expenses:Uncategorized", "Expenses", currency="USD",
+        )
+        ledger_db.conn.commit()
+
+        account_id = ledger_db.fetchone(
+            "SELECT id FROM accounts WHERE name = ?", ("Assets:Bank:Checking",)
+        )["id"]
+
+        ledger_db.execute(
+            "INSERT INTO transactions (uuid, date, payee, status, created_at) VALUES (?, ?, ?, ?, ?)",
+            ("aabb0011", "2026-01-15", "ACH Deposit  META   PP - PAYROLL", "cleared", "2026-01-15T00:00:00+00:00"),
+        )
+        txn_id = ledger_db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        ledger_db.execute(
+            "INSERT INTO postings (transaction_id, account_id, amount, currency) VALUES (?, ?, ?, ?)",
+            (txn_id, account_id, "6549.97", "USD"),
+        )
+        ledger_db.conn.commit()
+
+        candidate = Transaction(
+            uuid="cc110022",
+            date="2026-01-15",
+            payee="ACH Deposit META PP - PAYROLL",
+            status="cleared",
+            created_at="2026-01-15T00:00:00+00:00",
+            postings=[Posting(amount=Decimal("6549.97"), currency="USD")],
+        )
+
+        result = dedup_transactions(ledger_db, [candidate], account_id)
+        assert len(result) == 0
+
+
 # ---------------------------------------------------------------------------
 # directory import
 # ---------------------------------------------------------------------------

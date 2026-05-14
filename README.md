@@ -88,8 +88,8 @@ finkit query "SELECT * FROM s_monthly_spending WHERE year_month = '2025-01'"
 | `finkit balances` | Show account balances |
 | `finkit transactions` | Search and list transactions |
 | `finkit accounts` | List all accounts |
-| `finkit import` | Import a CSV or XLSX statement file |
-| `finkit import-pdf` | Extract tables from a PDF statement |
+| `finkit import` | Import a CSV, XLSX, or PDF statement file |
+| `finkit import-pdf` | Extract raw text/tables from a PDF (extraction only) |
 | `finkit import-dir` | Batch import all matching files from a directory |
 | `finkit fetch-prices` | Fetch market prices for stocks, crypto, and forex |
 | `finkit manual-price` | Record a manual price entry |
@@ -104,11 +104,13 @@ finkit query "SELECT * FROM s_monthly_spending WHERE year_month = '2025-01'"
 | `finkit rebuild` | Rebuild all summary tables from core data |
 | `finkit backup` | Create a database backup using SQLite backup API |
 
-All commands accept `--data-dir` to override the default data directory (`~/finance`).
+All commands accept `--data-dir` to override the default data directory (`~/finance`). You can also set the `FINKIT_DATA_DIR` environment variable (or add it to a `.env` file in the project root).
 
 ## MCP Server
 
-Start the MCP server to expose FinKit tools to any MCP-compatible LLM client:
+The MCP server exposes 20 tools to any MCP-compatible LLM client. For Claude Code, it auto-configures via `.mcp.json` — just open the project and the tools are available.
+
+For other MCP clients, start the server manually:
 
 ```bash
 python -m finkit.mcp.server
@@ -171,6 +173,18 @@ All data is stored locally:
 - **Backups**: `~/finance/backups/`
 
 No data is ever sent to any external service. Market price fetching is the only network operation, and it sends only ticker symbols --- never your account data, balances, or transaction history.
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Architecture](docs/architecture.md) | System design, data flow, and key decisions |
+| [Schema Reference](docs/schema_reference.md) | Database table layouts with example queries |
+| [Tools Reference](docs/tools_reference.md) | Detailed parameter docs for all 20 MCP tools and CLI commands |
+| [Roadmap](docs/roadmap.md) | Completed features, known limitations, and future ideas |
+| [Quickstart](example/quickstart.md) | Step-by-step walkthrough from install to portfolio analysis |
+| [Contributing](CONTRIBUTING.md) | Code conventions and patterns for adding new features |
+| [Changelog](CHANGELOG.md) | What changed in each release |
 
 ## License
 

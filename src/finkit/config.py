@@ -69,7 +69,8 @@ def load_settings(config_path: Path | None = None, data_dir: Path | None = None)
                 raw = tomllib.load(f)
 
     general = raw.get("general", {})
-    resolved_data_dir = data_dir or Path(os.path.expanduser(general.get("data_dir", "~/finance")))
+    env_data_dir = os.environ.get("FINKIT_DATA_DIR")
+    resolved_data_dir = data_dir or (Path(env_data_dir) if env_data_dir else Path(os.path.expanduser(general.get("data_dir", "~/finance"))))
 
     holding = dict(_DEFAULT_HOLDING_PERIODS)
     for key, val in raw.get("holding_periods", {}).items():

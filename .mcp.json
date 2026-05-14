@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "finkit": {
+      "command": "python",
+      "args": ["-m", "finkit.mcp.server"],
+      "cwd": "."
+    }
+  }
+}

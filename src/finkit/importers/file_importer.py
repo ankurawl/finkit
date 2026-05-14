@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import os
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -25,6 +26,12 @@ def _now_iso() -> str:
 
 def _gen_uuid() -> str:
     return uuid.uuid4().hex[:8]
+
+
+def _normalize_payee(payee: str | None) -> str | None:
+    if payee is None:
+        return None
+    return re.sub(r"\s+", " ", payee).strip()
 
 
 def detect_format(file_path: Path) -> dict:
@@ -303,19 +310,23 @@ def dedup_transactions(
         start_date = (txn_date - timedelta(days=window_days)).strftime("%Y-%m-%d")
         end_date = (txn_date + timedelta(days=window_days)).strftime("%Y-%m-%d")
 
-        existing = db.fetchall(
+        candidates = db.fetchall(
             """
-            SELECT t.id FROM transactions t
+            SELECT t.id, t.payee, p.amount FROM transactions t
             JOIN postings p ON p.transaction_id = t.id
             WHERE p.account_id = ?
               AND t.date BETWEEN ? AND ?
-              AND p.amount = ?
-              AND (t.payee = ? OR (t.payee IS NULL AND ? IS NULL))
-            LIMIT 1
+              AND CAST(p.amount AS REAL) = CAST(? AS REAL)
             """,
-            (account_id, start_date, end_date, str(amount), txn.payee, txn.payee),
+            (account_id, start_date, end_date, str(amount)),
         )
-        if not existing:
+
+        normalized_payee = _normalize_payee(txn.payee)
+        is_dup = any(
+            _normalize_payee(c["payee"]) == normalized_payee
+            for c in candidates
+        )
+        if not is_dup:
             new_txns.append(txn)
 
     return new_txns
@@ -386,6 +397,8 @@ def import_file(
     if not file_path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
 
+    is_pdf = file_path.suffix.lower() == ".pdf"
+
     mapping: dict | None = None
     if mapping_name:
         mapping = load_column_mapping(db, mapping_name)
@@ -397,7 +410,21 @@ def import_file(
         if not is_new:
             return {"imported": 0, "skipped": 0, "total": 0, "duplicate_file": True}
 
-        raw_rows = extract_rows(file_path, mapping)
+        if is_pdf:
+            from finkit.importers.pdf_extractor import extract_pdf
+            from finkit.importers.pdf_parsers import PDF_STANDARD_MAPPING, parse_pdf_text
+
+            pdf_result = extract_pdf(file_path=file_path)
+            raw_rows = parse_pdf_text(
+                pdf_result["text"],
+                institution=institution,
+                filename=file_path.name,
+            )
+            if mapping is None:
+                mapping = PDF_STANDARD_MAPPING
+        else:
+            raw_rows = extract_rows(file_path, mapping)
+
         total = len(raw_rows)
 
         now = _now_iso()
