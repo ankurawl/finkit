@@ -13,6 +13,7 @@ from finkit.operations import (
     init_ledger,
     open_account,
     submit_transaction,
+    submit_transactions,
     undo_import,
 )
 
@@ -275,3 +276,242 @@ def test_atomic_rollback(ledger_db):
 
     postings = ledger_db.fetchall("SELECT * FROM postings")
     assert len(postings) == 0
+
+
+# ---------------------------------------------------------------------------
+# source_file_id tests
+# ---------------------------------------------------------------------------
+
+
+def _create_source_file(db):
+    """Insert a fake source_files row for testing provenance linkage."""
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    cursor = db.execute(
+        "INSERT INTO source_files (path, original_path, sha256, file_type, imported_at, original_filename) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        ("2024/test.csv", "/tmp/test.csv", "abc123fake", "csv", now, "test.csv"),
+    )
+    db.conn.commit()
+    return cursor.lastrowid
+
+
+def test_submit_with_source_file_id(ledger_db):
+    open_account(ledger_db, name="Assets:Chase:Checking", type="Assets")
+    open_account(ledger_db, name="Expenses:Groceries", type="Expenses")
+    ledger_db.conn.commit()
+
+    sf_id = _create_source_file(ledger_db)
+
+    uuid = submit_transaction(
+        ledger_db,
+        date="2024-06-01",
+        payee="Test Store",
+        postings=[
+            {"account": "Assets:Chase:Checking", "amount": "-25.00", "currency": "USD"},
+            {"account": "Expenses:Groceries", "amount": "25.00", "currency": "USD"},
+        ],
+        source_file_id=sf_id,
+    )
+
+    txn = ledger_db.fetchone("SELECT * FROM transactions WHERE uuid = ?", (uuid,))
+    assert txn["source_file_id"] == sf_id
+
+
+def test_submit_with_invalid_source_file_id(ledger_db):
+    open_account(ledger_db, name="Assets:Chase:Checking", type="Assets")
+    open_account(ledger_db, name="Expenses:Groceries", type="Expenses")
+    ledger_db.conn.commit()
+
+    with pytest.raises(ValueError, match="source_file_id 9999 not found"):
+        submit_transaction(
+            ledger_db,
+            date="2024-06-01",
+            payee="Test Store",
+            postings=[
+                {"account": "Assets:Chase:Checking", "amount": "-25.00", "currency": "USD"},
+                {"account": "Expenses:Groceries", "amount": "25.00", "currency": "USD"},
+            ],
+            source_file_id=9999,
+        )
+
+
+def test_submit_without_source_file_id(ledger_db):
+    open_account(ledger_db, name="Assets:Chase:Checking", type="Assets")
+    open_account(ledger_db, name="Expenses:Groceries", type="Expenses")
+    ledger_db.conn.commit()
+
+    uuid = submit_transaction(
+        ledger_db,
+        date="2024-06-01",
+        payee="Test Store",
+        postings=[
+            {"account": "Assets:Chase:Checking", "amount": "-25.00", "currency": "USD"},
+            {"account": "Expenses:Groceries", "amount": "25.00", "currency": "USD"},
+        ],
+    )
+
+    txn = ledger_db.fetchone("SELECT * FROM transactions WHERE uuid = ?", (uuid,))
+    assert txn["source_file_id"] is None
+
+
+def test_undo_import_after_submit_with_source_file_id(ledger_db):
+    open_account(ledger_db, name="Assets:Chase:Checking", type="Assets")
+    open_account(ledger_db, name="Expenses:Groceries", type="Expenses")
+    ledger_db.conn.commit()
+
+    sf_id = _create_source_file(ledger_db)
+
+    submit_transaction(
+        ledger_db,
+        date="2024-06-01",
+        payee="Store A",
+        postings=[
+            {"account": "Assets:Chase:Checking", "amount": "-10.00", "currency": "USD"},
+            {"account": "Expenses:Groceries", "amount": "10.00", "currency": "USD"},
+        ],
+        source_file_id=sf_id,
+    )
+    submit_transaction(
+        ledger_db,
+        date="2024-06-02",
+        payee="Store B",
+        postings=[
+            {"account": "Assets:Chase:Checking", "amount": "-20.00", "currency": "USD"},
+            {"account": "Expenses:Groceries", "amount": "20.00", "currency": "USD"},
+        ],
+        source_file_id=sf_id,
+    )
+
+    txns_before = ledger_db.fetchall(
+        "SELECT * FROM transactions WHERE source_file_id = ?", (sf_id,)
+    )
+    assert len(txns_before) == 2
+
+    result = undo_import(ledger_db, source_file_id=sf_id)
+    assert result["deleted_transactions"] == 2
+
+    txns_after = ledger_db.fetchall(
+        "SELECT * FROM transactions WHERE source_file_id = ?", (sf_id,)
+    )
+    assert len(txns_after) == 0
+
+
+# ---------------------------------------------------------------------------
+# submit_transactions (batch) tests
+# ---------------------------------------------------------------------------
+
+
+def test_submit_transactions_batch(ledger_db):
+    open_account(ledger_db, name="Assets:Chase:Checking", type="Assets")
+    open_account(ledger_db, name="Expenses:Groceries", type="Expenses")
+    open_account(ledger_db, name="Expenses:Dining", type="Expenses")
+    ledger_db.conn.commit()
+
+    sf_id = _create_source_file(ledger_db)
+
+    uuids = submit_transactions(
+        ledger_db,
+        transactions=[
+            {
+                "date": "2024-07-01",
+                "payee": "Store A",
+                "postings": [
+                    {"account": "Assets:Chase:Checking", "amount": "-30.00", "currency": "USD"},
+                    {"account": "Expenses:Groceries", "amount": "30.00", "currency": "USD"},
+                ],
+            },
+            {
+                "date": "2024-07-02",
+                "payee": "Restaurant",
+                "postings": [
+                    {"account": "Assets:Chase:Checking", "amount": "-50.00", "currency": "USD"},
+                    {"account": "Expenses:Dining", "amount": "50.00", "currency": "USD"},
+                ],
+            },
+            {
+                "date": "2024-07-03",
+                "payee": "Store B",
+                "postings": [
+                    {"account": "Assets:Chase:Checking", "amount": "-15.00", "currency": "USD"},
+                    {"account": "Expenses:Groceries", "amount": "15.00", "currency": "USD"},
+                ],
+            },
+        ],
+        source_file_id=sf_id,
+    )
+
+    assert len(uuids) == 3
+
+    for uuid in uuids:
+        txn = ledger_db.fetchone("SELECT * FROM transactions WHERE uuid = ?", (uuid,))
+        assert txn is not None
+        assert txn["source_file_id"] == sf_id
+
+
+def test_submit_transactions_atomic_rollback(ledger_db):
+    open_account(ledger_db, name="Assets:Chase:Checking", type="Assets")
+    open_account(ledger_db, name="Expenses:Groceries", type="Expenses")
+    ledger_db.conn.commit()
+
+    with pytest.raises(UnbalancedTransactionError):
+        submit_transactions(
+            ledger_db,
+            transactions=[
+                {
+                    "date": "2024-07-01",
+                    "payee": "Good Transaction",
+                    "postings": [
+                        {"account": "Assets:Chase:Checking", "amount": "-30.00", "currency": "USD"},
+                        {"account": "Expenses:Groceries", "amount": "30.00", "currency": "USD"},
+                    ],
+                },
+                {
+                    "date": "2024-07-02",
+                    "payee": "Bad Transaction",
+                    "postings": [
+                        {"account": "Assets:Chase:Checking", "amount": "-50.00", "currency": "USD"},
+                        {"account": "Expenses:Groceries", "amount": "49.00", "currency": "USD"},
+                    ],
+                },
+            ],
+        )
+
+    txns = ledger_db.fetchall("SELECT * FROM transactions WHERE payee IN ('Good Transaction', 'Bad Transaction')")
+    assert len(txns) == 0
+
+
+def test_submit_transactions_empty(ledger_db):
+    uuids = submit_transactions(ledger_db, transactions=[])
+    assert uuids == []
+
+
+def test_submit_transactions_undo(ledger_db):
+    open_account(ledger_db, name="Assets:Chase:Checking", type="Assets")
+    open_account(ledger_db, name="Expenses:Groceries", type="Expenses")
+    ledger_db.conn.commit()
+
+    sf_id = _create_source_file(ledger_db)
+
+    uuids = submit_transactions(
+        ledger_db,
+        transactions=[
+            {
+                "date": "2024-07-01",
+                "payee": "Store",
+                "postings": [
+                    {"account": "Assets:Chase:Checking", "amount": "-10.00", "currency": "USD"},
+                    {"account": "Expenses:Groceries", "amount": "10.00", "currency": "USD"},
+                ],
+            },
+        ],
+        source_file_id=sf_id,
+    )
+    assert len(uuids) == 1
+
+    result = undo_import(ledger_db, source_file_id=sf_id)
+    assert result["deleted_transactions"] == 1
+
+    txn = ledger_db.fetchone("SELECT * FROM transactions WHERE uuid = ?", (uuids[0],))
+    assert txn is None

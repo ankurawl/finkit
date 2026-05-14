@@ -300,6 +300,58 @@ def submit_transaction(
 
 
 # ---------------------------------------------------------------------------
+# submit_transactions (batch)
+# ---------------------------------------------------------------------------
+
+def submit_transactions(
+    db: Database,
+    transactions: list[dict],
+    source_file_id: int | None = None,
+    settings: Settings | None = None,
+) -> list[str]:
+    """Submit multiple transactions atomically. All succeed or all fail."""
+    if not transactions:
+        return []
+
+    uuids: list[str] = []
+    all_account_ids: set[int] = set()
+    all_commodities: set[str] = set()
+    all_dates: list[str] = []
+
+    with db.transaction():
+        if source_file_id is not None:
+            row = db.fetchone("SELECT id FROM source_files WHERE id = ?", (source_file_id,))
+            if row is None:
+                raise ValueError(f"source_file_id {source_file_id} not found in source_files")
+
+        for txn_dict in transactions:
+            uuid, account_ids, commodities = _save_single_transaction(
+                db,
+                date=txn_dict["date"],
+                postings=txn_dict["postings"],
+                payee=txn_dict.get("payee"),
+                narration=txn_dict.get("narration"),
+                tags=txn_dict.get("tags"),
+                status=txn_dict.get("status", "cleared"),
+                source_file_id=source_file_id,
+                settings=settings,
+            )
+            uuids.append(uuid)
+            all_account_ids.update(account_ids)
+            all_commodities.update(commodities)
+            all_dates.append(txn_dict["date"])
+
+        context = RefreshContext(
+            affected_account_ids=all_account_ids,
+            affected_date_range=(min(all_dates), max(all_dates)),
+            affected_commodities=all_commodities,
+        )
+        registry.refresh_all(db, context)
+
+    return uuids
+
+
+# ---------------------------------------------------------------------------
 # amend_transaction
 # ---------------------------------------------------------------------------
 

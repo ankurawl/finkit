@@ -78,6 +78,7 @@ def submit_transaction(
     narration: Annotated[str | None, "Transaction description"] = None,
     tags: Annotated[list[str] | None, "Tags for categorization"] = None,
     status: Annotated[str, "Transaction status: cleared, pending, or voided"] = "cleared",
+    source_file_id: Annotated[int | None, "Link to source document from ingest_document. Enables undo_import."] = None,
 ) -> dict:
     """Submit a new double-entry transaction. Postings must sum to zero."""
     try:
@@ -92,7 +93,30 @@ def submit_transaction(
             narration=narration,
             tags=tags,
             status=status,
+            source_file_id=source_file_id,
         )
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def submit_transactions(
+    transactions: Annotated[list[dict], "List of transaction dicts, each with: date, postings, and optional payee, narration, tags, status"],
+    source_file_id: Annotated[int | None, "Shared source document ID from ingest_document. Enables undo_import."] = None,
+) -> dict:
+    """Submit multiple transactions atomically. All succeed or all fail."""
+    try:
+        from finkit.operations import submit_transactions as _submit_transactions
+
+        db = _get_db()
+        settings = _get_settings()
+        uuids = _submit_transactions(
+            db,
+            transactions=transactions,
+            source_file_id=source_file_id,
+            settings=settings,
+        )
+        return {"uuids": uuids, "count": len(uuids), "source_file_id": source_file_id}
     except Exception as e:
         return {"error": str(e)}
 
