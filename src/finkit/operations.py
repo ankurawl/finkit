@@ -123,7 +123,7 @@ def open_account(
 # submit_transaction
 # ---------------------------------------------------------------------------
 
-def submit_transaction(
+def _save_single_transaction(
     db: Database,
     date: str,
     postings: list[dict],
@@ -131,8 +131,12 @@ def submit_transaction(
     narration: str | None = None,
     tags: list[str] | None = None,
     status: str = "cleared",
+    source_file_id: int | None = None,
     settings: Settings | None = None,
-) -> str:
+) -> tuple[str, set[int], set[str]]:
+    """Process and save a single transaction inside an existing db transaction.
+    Returns (uuid, affected_account_ids, affected_commodities).
+    """
     uuid = _generate_uuid()
     now = _now_iso()
 
@@ -173,98 +177,122 @@ def submit_transaction(
 
     validate_transaction(db, txn)
 
-    with db.transaction():
+    if source_file_id is not None:
+        row = db.fetchone("SELECT id FROM source_files WHERE id = ?", (source_file_id,))
+        if row is None:
+            raise ValueError(f"source_file_id {source_file_id} not found in source_files")
+
+    cursor = db.execute(
+        """
+        INSERT INTO transactions (uuid, date, payee, narration, status, created_at, source_file_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (uuid, date, payee, narration, status, now, source_file_id),
+    )
+    txn_id = cursor.lastrowid
+
+    affected_account_ids: set[int] = set()
+
+    for i, posting in enumerate(posting_objs):
+        posting.transaction_id = txn_id
+        lot_id = None
+
+        acct_row = db.fetchone(
+            "SELECT booking_method, jurisdiction, asset_class FROM accounts WHERE id = ?",
+            (posting.account_id,),
+        )
+        booking_method = acct_row["booking_method"] if acct_row else None
+
+        if booking_method and posting.amount > Decimal("0"):
+            cost_price = posting.cost_amount or posting.price or Decimal("0")
+            cost_cur = posting.cost_currency or posting.price_currency or "USD"
+            lot_id = acquire_lot(
+                db,
+                account_id=posting.account_id,
+                commodity=posting.currency,
+                quantity=posting.amount,
+                cost_price=cost_price,
+                cost_currency=cost_cur,
+                acquired_date=date,
+                source_transaction_id=txn_id,
+                label=postings[i].get("lot_label"),
+                lock_until=postings[i].get("lock_until"),
+            )
+
         cursor = db.execute(
             """
-            INSERT INTO transactions (uuid, date, payee, narration, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO postings
+                (transaction_id, account_id, amount, currency,
+                 cost_amount, cost_currency, cost_date,
+                 price, price_currency, lot_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (uuid, date, payee, narration, status, now),
+            (
+                txn_id,
+                posting.account_id,
+                str(posting.amount),
+                posting.currency,
+                str(posting.cost_amount) if posting.cost_amount is not None else None,
+                posting.cost_currency,
+                posting.cost_date,
+                str(posting.price) if posting.price is not None else None,
+                posting.price_currency,
+                lot_id,
+            ),
         )
-        txn_id = cursor.lastrowid
+        posting.id = cursor.lastrowid
 
-        affected_account_ids: set[int] = set()
-
-        for i, posting in enumerate(posting_objs):
-            posting.transaction_id = txn_id
-            lot_id = None
-
-            acct_row = db.fetchone(
-                "SELECT booking_method, jurisdiction, asset_class FROM accounts WHERE id = ?",
-                (posting.account_id,),
+        if booking_method and posting.amount < Decimal("0"):
+            sell_qty = abs(posting.amount)
+            proceeds = posting.price or Decimal("0")
+            proceeds_cur = posting.price_currency or "USD"
+            dispose_lots(
+                db,
+                account_id=posting.account_id,
+                commodity=posting.currency,
+                quantity=sell_qty,
+                proceeds_per_unit=proceeds,
+                proceeds_currency=proceeds_cur,
+                sell_transaction_id=txn_id,
+                booking_method=booking_method,
+                settings=settings,
             )
-            booking_method = acct_row["booking_method"] if acct_row else None
 
-            if booking_method and posting.amount > Decimal("0"):
-                cost_price = posting.cost_amount or posting.price or Decimal("0")
-                cost_cur = posting.cost_currency or posting.price_currency or "USD"
-                lot_id = acquire_lot(
-                    db,
-                    account_id=posting.account_id,
-                    commodity=posting.currency,
-                    quantity=posting.amount,
-                    cost_price=cost_price,
-                    cost_currency=cost_cur,
-                    acquired_date=date,
-                    source_transaction_id=txn_id,
-                    label=postings[i].get("lot_label"),
-                    lock_until=postings[i].get("lock_until"),
-                )
+        affected_account_ids.add(posting.account_id)
 
-            cursor = db.execute(
-                """
-                INSERT INTO postings
-                    (transaction_id, account_id, amount, currency,
-                     cost_amount, cost_currency, cost_date,
-                     price, price_currency, lot_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    txn_id,
-                    posting.account_id,
-                    str(posting.amount),
-                    posting.currency,
-                    str(posting.cost_amount) if posting.cost_amount is not None else None,
-                    posting.cost_currency,
-                    posting.cost_date,
-                    str(posting.price) if posting.price is not None else None,
-                    posting.price_currency,
-                    lot_id,
-                ),
+    record_prices_from_postings(db, posting_objs)
+
+    if tags:
+        for tag in tags:
+            db.execute(
+                "INSERT INTO transaction_tags (transaction_id, tag) VALUES (?, ?)",
+                (txn_id, tag),
             )
-            posting.id = cursor.lastrowid
 
-            if booking_method and posting.amount < Decimal("0"):
-                sell_qty = abs(posting.amount)
-                proceeds = posting.price or Decimal("0")
-                proceeds_cur = posting.price_currency or "USD"
-                dispose_lots(
-                    db,
-                    account_id=posting.account_id,
-                    commodity=posting.currency,
-                    quantity=sell_qty,
-                    proceeds_per_unit=proceeds,
-                    proceeds_currency=proceeds_cur,
-                    sell_transaction_id=txn_id,
-                    booking_method=booking_method,
-                    settings=settings,
-                )
+    affected_commodities = {p.currency for p in posting_objs}
 
-            affected_account_ids.add(posting.account_id)
+    return uuid, affected_account_ids, affected_commodities
 
-        record_prices_from_postings(db, posting_objs)
 
-        if tags:
-            for tag in tags:
-                db.execute(
-                    "INSERT INTO transaction_tags (transaction_id, tag) VALUES (?, ?)",
-                    (txn_id, tag),
-                )
-
+def submit_transaction(
+    db: Database,
+    date: str,
+    postings: list[dict],
+    payee: str | None = None,
+    narration: str | None = None,
+    tags: list[str] | None = None,
+    status: str = "cleared",
+    source_file_id: int | None = None,
+    settings: Settings | None = None,
+) -> str:
+    with db.transaction():
+        uuid, affected_account_ids, affected_commodities = _save_single_transaction(
+            db, date, postings, payee, narration, tags, status, source_file_id, settings
+        )
         context = RefreshContext(
             affected_account_ids=affected_account_ids,
             affected_date_range=(date, date),
-            affected_commodities={p.currency for p in posting_objs},
+            affected_commodities=affected_commodities,
         )
         registry.refresh_all(db, context)
 
