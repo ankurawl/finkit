@@ -1,0 +1,35 @@
+[general]
+# Path to the directory where finkit stores its database and statement files
+data_dir = "~/finance"
+# Default currency for new accounts
+default_currency = "USD"
+# Base currency for consolidated net worth calculations
+base_currency = "USD"
+
+[holding_periods]
+# jurisdiction.asset_class = days to qualify as long-term
+# US equities and crypto: 1 year
+"US.equity" = 365
+"US.crypto" = 365
+# India equities: 1 year
+"IN.equity" = 365
+# India debt instruments: 3 years
+"IN.debt" = 1095
+# India ELSS funds: 3-year lock-in
+"IN.elss" = 1095
+
+[import]
+# Window (days) for detecting duplicate transactions during import
+dedup_window_days = 3
+
+[market]
+# Price data sources
+stock_source = "yfinance"
+crypto_source = "coingecko"
+forex_source = "exchangerate-api"
+
+[ollama]
+# Enable LLM-based categorization via local Ollama instance
+enabled = false
+model = "qwen2.5:7b"
+base_url = "http://localhost:11434"

@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+*.so
+
+# Personal finance data — NEVER commit
+*.db
+*.db-wal
+*.db-shm
+finkit.db
+statements/
+backups/
+finkit.toml
+.env
+.env.*
+
+# Imported / archived financial documents
+*.ofx
+*.qfx
+*.qif
+
+# IDE / tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
