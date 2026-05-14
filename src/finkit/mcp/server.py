@@ -487,5 +487,82 @@ def import_directory(
         return {"error": str(e)}
 
 
+@mcp.tool()
+def ingest_document(
+    file_path: Annotated[str, "Path to any financial document (PDF, CSV, XLSX)"],
+    password: Annotated[str | None, "Password for encrypted PDFs"] = None,
+    institution: Annotated[str | None, "Institution name override for classification"] = None,
+) -> dict:
+    """Archive a financial document, extract its content, classify the document type, and
+    return extracted text with structured hints for LLM interpretation. Does not create
+    transactions — use submit_transaction(s) with the returned source_file_id for that."""
+    try:
+        from finkit.importers.document_ingester import ingest_document as _ingest_document
+
+        db = _get_db()
+        settings = _get_settings()
+        return _ingest_document(
+            db,
+            settings=settings,
+            file_path=file_path,
+            password=password,
+            institution=institution,
+        )
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def setup_payroll_accounts(
+    employer: Annotated[str, "Employer name, used in account hierarchy (e.g., 'Acme')"],
+    jurisdiction: Annotated[str, "Tax jurisdiction: US or IN"] = "US",
+) -> dict:
+    """Create the standard payroll account hierarchy for an employer. Idempotent —
+    skips accounts that already exist. Returns a role-to-account-name mapping."""
+    try:
+        from finkit.analysis.payslip import setup_payroll_accounts as _setup_payroll_accounts
+
+        db = _get_db()
+        return _setup_payroll_accounts(db, employer=employer, jurisdiction=jurisdiction)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def reconcile_tax_document(
+    form_type: Annotated[str, "Tax form type: w2, 1099_int, 1099_div, 1099_b, form16"],
+    year: Annotated[int, "Tax year"],
+    fields: Annotated[dict, "Key-value pairs extracted from the tax form (amounts as decimal strings)"],
+) -> dict:
+    """Compare tax form data against recorded transactions. Returns field-by-field
+    comparison with match/mismatch/missing status and suggested transactions for gaps."""
+    try:
+        from finkit.analysis.tax_reconciliation import reconcile_tax_document as _reconcile_tax_document
+
+        db = _get_db()
+        return _reconcile_tax_document(db, form_type=form_type, year=year, fields=fields)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def tax_readiness_report(
+    year: Annotated[int | None, "Tax year, defaults to previous year"] = None,
+    jurisdiction: Annotated[str, "Tax jurisdiction: US or IN"] = "US",
+) -> dict:
+    """Generate a tax readiness report showing what income, deductions, and gains are
+    captured vs. what's likely missing for the given tax year."""
+    try:
+        from finkit.analysis.tax_reconciliation import tax_readiness_report as _tax_readiness_report
+        from datetime import datetime
+
+        db = _get_db()
+        if year is None:
+            year = datetime.now().year - 1
+        return _tax_readiness_report(db, year=year, jurisdiction=jurisdiction)
+    except Exception as e:
+        return {"error": str(e)}
+
+
 if __name__ == "__main__":
     mcp.run()
