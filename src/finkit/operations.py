@@ -521,6 +521,316 @@ def amend_transaction(
         registry.refresh_all(db, context)
 
 
+def _check_lot_tracked(db: Database, account_id: int) -> bool:
+    row = db.fetchone(
+        "SELECT booking_method FROM accounts WHERE id = ?", (account_id,)
+    )
+    return row is not None and row["booking_method"] is not None
+
+
+def _recategorize_posting_core(
+    db: Database, uuid: str, old_account: str, new_account: str,
+    posting_id: int | None = None,
+) -> tuple[int, str]:
+    """Core recategorize logic — UPDATE only, no summary refresh.
+    Returns (txn_id, date) for caller to aggregate refresh context.
+    """
+    txn_row = db.fetchone("SELECT * FROM transactions WHERE uuid = ?", (uuid,))
+    if txn_row is None:
+        raise ValueError(f"Transaction with uuid '{uuid}' not found")
+    txn_id = txn_row["id"]
+
+    if posting_id is not None:
+        posting_row = db.fetchone(
+            "SELECT * FROM postings WHERE id = ? AND transaction_id = ?",
+            (posting_id, txn_id),
+        )
+        if posting_row is None:
+            raise ValueError(
+                f"Posting id {posting_id} not found on transaction {uuid}"
+            )
+        if _check_lot_tracked(db, posting_row["account_id"]):
+            raise ValueError(
+                f"Cannot recategorize: posting {posting_id} is on a lot-tracked account"
+            )
+        new_account_id = resolve_account(db, new_account)
+        if _check_lot_tracked(db, new_account_id):
+            raise ValueError(
+                f"Cannot recategorize to '{new_account}': target is a lot-tracked account"
+            )
+        db.execute(
+            "UPDATE postings SET account_id = ? WHERE id = ?",
+            (new_account_id, posting_id),
+        )
+    else:
+        old_row = db.fetchone(
+            "SELECT id FROM accounts WHERE name = ?", (old_account,)
+        )
+        if old_row is None:
+            raise ValueError(f"Account '{old_account}' not found")
+        old_account_id = old_row["id"]
+
+        if _check_lot_tracked(db, old_account_id):
+            raise ValueError(
+                f"Cannot recategorize: '{old_account}' is a lot-tracked account"
+            )
+
+        matching = db.fetchall(
+            "SELECT id FROM postings WHERE transaction_id = ? AND account_id = ?",
+            (txn_id, old_account_id),
+        )
+        if not matching:
+            raise ValueError(
+                f"No posting to '{old_account}' found on transaction {uuid}"
+            )
+        if len(matching) > 1:
+            ids = [m["id"] for m in matching]
+            raise ValueError(
+                f"Multiple postings to '{old_account}' on transaction {uuid}: "
+                f"posting IDs {ids}. Use get_transactions(uuid='{uuid}') to see "
+                f"posting IDs, then pass posting_id to disambiguate."
+            )
+
+        new_account_id = resolve_account(db, new_account)
+        if _check_lot_tracked(db, new_account_id):
+            raise ValueError(
+                f"Cannot recategorize to '{new_account}': target is a lot-tracked account"
+            )
+        db.execute(
+            "UPDATE postings SET account_id = ? WHERE id = ?",
+            (new_account_id, matching[0]["id"]),
+        )
+
+    now = _now_iso()
+    db.execute(
+        "UPDATE transactions SET modified_at = ? WHERE id = ?", (now, txn_id)
+    )
+    return txn_id, txn_row["date"]
+
+
+def _refresh_for_transaction(db: Database, txn_id: int, date: str) -> None:
+    """Build RefreshContext from a transaction's postings and refresh summaries."""
+    affected_account_ids: set[int] = set()
+    affected_commodities: set[str] = set()
+    all_postings = db.fetchall(
+        "SELECT account_id, currency FROM postings WHERE transaction_id = ?",
+        (txn_id,),
+    )
+    for p in all_postings:
+        affected_account_ids.add(p["account_id"])
+        affected_commodities.add(p["currency"])
+    context = RefreshContext(
+        affected_account_ids=affected_account_ids,
+        affected_date_range=(date, date),
+        affected_commodities=affected_commodities,
+    )
+    registry.refresh_all(db, context)
+
+
+def _recategorize_posting(
+    db: Database, uuid: str, old_account: str, new_account: str,
+    posting_id: int | None = None,
+) -> None:
+    """Recategorize + refresh. For use inside a single-item db.transaction()."""
+    txn_id, date = _recategorize_posting_core(db, uuid, old_account, new_account, posting_id)
+    _refresh_for_transaction(db, txn_id, date)
+
+
+def recategorize_posting(
+    db: Database, uuid: str, old_account: str, new_account: str,
+    posting_id: int | None = None, settings: Settings | None = None,
+) -> None:
+    with db.transaction():
+        _recategorize_posting(db, uuid, old_account, new_account, posting_id)
+
+
+def batch_recategorize(
+    db: Database, pattern: str, pattern_type: str,
+    old_account: str, new_account: str, settings: Settings | None = None,
+) -> int:
+    if old_account == new_account:
+        return 0
+
+    from finkit.categorize.batch import find_matching_transactions
+
+    with db.transaction():
+        matches = find_matching_transactions(db, pattern, pattern_type, old_account)
+        if not matches:
+            return 0
+
+        new_account_id = resolve_account(db, new_account)
+        if _check_lot_tracked(db, new_account_id):
+            raise ValueError(
+                f"Cannot batch recategorize to '{new_account}': target is a lot-tracked account"
+            )
+
+        all_account_ids: set[int] = set()
+        all_commodities: set[str] = set()
+        all_dates: list[str] = []
+
+        for m in matches:
+            txn_id, date = _recategorize_posting_core(
+                db, m["uuid"], old_account, new_account, posting_id=m["posting_id"]
+            )
+            postings = db.fetchall(
+                "SELECT account_id, currency FROM postings WHERE transaction_id = ?",
+                (txn_id,),
+            )
+            for p in postings:
+                all_account_ids.add(p["account_id"])
+                all_commodities.add(p["currency"])
+            all_dates.append(date)
+
+        context = RefreshContext(
+            affected_account_ids=all_account_ids,
+            affected_date_range=(min(all_dates), max(all_dates)),
+            affected_commodities=all_commodities,
+        )
+        registry.refresh_all(db, context)
+
+        return len(matches)
+
+
+def merge_duplicates(
+    db: Database, keep_uuid: str, delete_uuid: str,
+    enrich: bool = False, settings: Settings | None = None,
+) -> None:
+    keep_row = db.fetchone("SELECT * FROM transactions WHERE uuid = ?", (keep_uuid,))
+    if keep_row is None:
+        raise ValueError(f"Transaction '{keep_uuid}' not found")
+
+    delete_row = db.fetchone("SELECT * FROM transactions WHERE uuid = ?", (delete_uuid,))
+    if delete_row is None:
+        raise ValueError(f"Transaction '{delete_uuid}' not found")
+
+    keep_id = keep_row["id"]
+    delete_id = delete_row["id"]
+
+    delete_postings = db.fetchall(
+        "SELECT account_id, currency FROM postings WHERE transaction_id = ?",
+        (delete_id,),
+    )
+    keep_postings = db.fetchall(
+        "SELECT account_id, currency FROM postings WHERE transaction_id = ?",
+        (keep_id,),
+    )
+
+    affected_account_ids = {p["account_id"] for p in delete_postings} | {p["account_id"] for p in keep_postings}
+    affected_commodities = {p["currency"] for p in delete_postings} | {p["currency"] for p in keep_postings}
+    dates = [keep_row["date"], delete_row["date"]]
+
+    with db.transaction():
+        if enrich:
+            now = _now_iso()
+            if delete_row["payee"] and not keep_row["payee"]:
+                db.execute(
+                    "UPDATE transactions SET payee = ?, modified_at = ? WHERE id = ?",
+                    (delete_row["payee"], now, keep_id),
+                )
+            if delete_row["narration"] and not keep_row["narration"]:
+                db.execute(
+                    "UPDATE transactions SET narration = ?, modified_at = ? WHERE id = ?",
+                    (delete_row["narration"], now, keep_id),
+                )
+
+            delete_tags = db.fetchall(
+                "SELECT tag FROM transaction_tags WHERE transaction_id = ?",
+                (delete_id,),
+            )
+            for t in delete_tags:
+                db.execute(
+                    "INSERT OR IGNORE INTO transaction_tags (transaction_id, tag) VALUES (?, ?)",
+                    (keep_id, t["tag"]),
+                )
+
+        _undo_lot_effects(db, delete_id)
+        db.execute("DELETE FROM transactions WHERE id = ?", (delete_id,))
+
+        context = RefreshContext(
+            affected_account_ids=affected_account_ids,
+            affected_date_range=(min(dates), max(dates)),
+            affected_commodities=affected_commodities,
+        )
+        registry.refresh_all(db, context)
+
+
+def link_transfer(
+    db: Database, uuid_from: str, uuid_to: str, settings: Settings | None = None,
+) -> None:
+    from_row = db.fetchone("SELECT * FROM transactions WHERE uuid = ?", (uuid_from,))
+    if from_row is None:
+        raise ValueError(f"Transaction '{uuid_from}' not found")
+    to_row = db.fetchone("SELECT * FROM transactions WHERE uuid = ?", (uuid_to,))
+    if to_row is None:
+        raise ValueError(f"Transaction '{uuid_to}' not found")
+
+    to_id = to_row["id"]
+    to_postings = db.fetchall(
+        "SELECT p.*, a.name AS account_name FROM postings p "
+        "JOIN accounts a ON p.account_id = a.id WHERE p.transaction_id = ?",
+        (to_id,),
+    )
+    real_account_from_to = None
+    for p in to_postings:
+        if "uncategorized" not in p["account_name"].lower():
+            real_account_from_to = p["account_name"]
+            break
+
+    if real_account_from_to is None:
+        raise ValueError(f"Cannot determine real account from transaction '{uuid_to}'")
+
+    from_id = from_row["id"]
+    from_postings = db.fetchall(
+        "SELECT p.*, a.name AS account_name FROM postings p "
+        "JOIN accounts a ON p.account_id = a.id WHERE p.transaction_id = ?",
+        (from_id,),
+    )
+    uncat_posting = None
+    for p in from_postings:
+        if "uncategorized" in p["account_name"].lower():
+            uncat_posting = p
+            break
+
+    if uncat_posting is None:
+        raise ValueError(f"No uncategorized posting on transaction '{uuid_from}'")
+
+    all_postings = db.fetchall(
+        "SELECT account_id, currency FROM postings WHERE transaction_id IN (?, ?)",
+        (from_id, to_id),
+    )
+    affected_account_ids = {p["account_id"] for p in all_postings}
+    affected_commodities = {p["currency"] for p in all_postings}
+    dates = [from_row["date"], to_row["date"]]
+
+    with db.transaction():
+        _recategorize_posting_core(
+            db, uuid_from, uncat_posting["account_name"],
+            real_account_from_to, posting_id=uncat_posting["id"],
+        )
+
+        provenance = to_row.get("source_file_id")
+        if provenance:
+            existing_narration = from_row["narration"] or ""
+            new_narration = f"{existing_narration} [linked from source_file_id={provenance}]".strip()
+            db.execute(
+                "UPDATE transactions SET narration = ? WHERE id = ?",
+                (new_narration, from_id),
+            )
+
+        _undo_lot_effects(db, to_id)
+        db.execute("DELETE FROM transactions WHERE id = ?", (to_id,))
+
+        new_account_id = resolve_account(db, real_account_from_to)
+        affected_account_ids.add(new_account_id)
+
+        context = RefreshContext(
+            affected_account_ids=affected_account_ids,
+            affected_date_range=(min(dates), max(dates)),
+            affected_commodities=affected_commodities,
+        )
+        registry.refresh_all(db, context)
+
+
 def _undo_lot_effects(db: Database, txn_id: int) -> None:
     dispositions = db.fetchall(
         "SELECT * FROM lot_dispositions WHERE sell_transaction_id = ?",

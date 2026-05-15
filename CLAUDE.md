@@ -6,7 +6,7 @@ MCP tools. See `README.md` for features and installation.
 ## Use MCP tools, not CLI
 
 The MCP server is auto-configured via `.mcp.json`. Prefer MCP tools over
-running CLI commands via Bash. See `docs/tools_reference.md` for all 25 tools.
+running CLI commands via Bash. See `docs/tools_reference.md` for all 39 tools.
 
 ## Documentation map
 
@@ -15,7 +15,7 @@ running CLI commands via Bash. See `docs/tools_reference.md` for all 25 tools.
 | `README.md` | Features, installation, quick start, configuration |
 | `docs/architecture.md` | System design, data flow, import pipeline, lot tracking |
 | `docs/schema_reference.md` | All database tables with column definitions and example queries |
-| `docs/tools_reference.md` | All 25 MCP tools and CLI commands with parameters and examples |
+| `docs/tools_reference.md` | All 39 MCP tools and CLI commands with parameters and examples |
 | `docs/roadmap.md` | Completed features, known limitations, future ideas |
 | `CONTRIBUTING.md` | Code conventions, how to add importers/tools/summaries |
 | `example/quickstart.md` | Step-by-step walkthrough from install to portfolio analysis |
@@ -64,3 +64,19 @@ the account hierarchy, then use `submit_transactions` with the payslip line item
 
 For tax documents: call `reconcile_tax_document(form_type, year, fields)` to compare
 form data against the ledger. Use `tax_readiness_report(year)` for gap analysis.
+
+## Template-based document import
+
+For documents where a template exists (learn once, apply forever):
+
+1. `learn_template(file_path, template_name)` — extracts text and returns hints
+2. LLM generates regex patterns → calls `save_document_template(...)` to save
+3. `apply_template(file_path, dry_run=True)` — auto-matches template, previews extraction
+4. `apply_template(file_path, dry_run=False)` — submits transactions
+
+## Post-import cleanup
+
+- `batch_recategorize(pattern, old_account, new_account)` — bulk recategorize by payee
+- `find_duplicates()` → `merge_duplicates(keep, delete)` — cross-source duplicate cleanup
+- `detect_transfers()` → `link_transfer(from, to)` — link inter-account transfers
+- `import_report()` — health check for uncategorized, duplicates, anomalies, gaps

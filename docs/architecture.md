@@ -35,7 +35,7 @@ Living architecture document for FinKit. For schema details see [schema_referenc
                  +-------v--------+
                  |   MCP Server   |
                  | (mcp/server.py)|
-                 |   25 tools     |
+                 |   39 tools     |
                  +-------+--------+
                          |
           +--------------+----------------+
@@ -135,7 +135,7 @@ with db.transaction():
     # If anything fails, the entire transaction rolls back
 ```
 
-Write operations: `submit_transaction`, `submit_transactions`, `amend_transaction`, `import_file`, `undo_import`, `corporate_action`, `fetch_prices`.
+Write operations: `submit_transaction`, `submit_transactions`, `amend_transaction`, `import_file`, `undo_import`, `corporate_action`, `fetch_prices`, `recategorize_posting`, `batch_recategorize`, `merge_duplicates`, `link_transfer`.
 
 ---
 
@@ -378,3 +378,21 @@ Stock splits (forward and reverse) and bonus shares adjust all undisposed lots f
 **Foreign keys enforced.** `PRAGMA foreign_keys = ON` on every connection. Cascade deletes on postings and tags when a transaction is deleted.
 
 **Read-only query boundary.** The ad-hoc `query` tool sets `PRAGMA query_only = ON` before executing user-provided SQL. This prevents accidental writes through the query interface.
+
+## Document Template Engine
+
+The template engine implements a "learn once, apply forever" pattern for document import:
+
+1. **Learn phase**: `learn_template` extracts text from a sample document and returns it to the LLM. The LLM generates regex patterns and field-to-account mappings, which are saved via `save_document_template`.
+
+2. **Apply phase**: `apply_template` auto-matches incoming documents to saved templates using keyword matching, extracts data via regex, builds transactions, and submits them through the standard import pipeline (archive → normalize → categorize → dedup → submit).
+
+Templates support two modes:
+- **Table mode** — for bank/CC statements with multiple transactions per document. Uses section delimiters and row patterns.
+- **Field mode** — for payslips, tax forms, and single-transaction documents. Uses named field patterns with type validation.
+
+Template matching ranks candidates by (1) number of matching keywords, then (2) use count. Confidence scoring tracks fields_extracted / fields_expected.
+
+## Payee Normalization
+
+Raw bank payees (e.g., "ACH Deposit ACME 9876543210 PP - DIRECT DEP") are normalized to canonical names (e.g., "Acme") using pattern-matching rules stored in `payee_normalization_rules`. The raw payee is preserved in the `payee` column; the canonical name is stored in `normalized_payee`. Downstream systems (categorization, duplicate detection, queries) prefer `normalized_payee` when available.

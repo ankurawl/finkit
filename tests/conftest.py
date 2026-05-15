@@ -71,3 +71,46 @@ HDFC_MAPPING = {
     "date_format": "%d/%m/%Y",
     "default_currency": "INR",
 }
+
+
+def create_multi_source_setup(db):
+    """Creates 2 source files and standard accounts for cross-source tests.
+    Returns (source_file_id_1, source_file_id_2, account_ids dict).
+    """
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    accounts = {}
+    for name, acct_type in [
+        ("Assets:BankA:Checking", "Assets"),
+        ("Assets:BankB:Savings", "Assets"),
+        ("Expenses:Uncategorized", "Expenses"),
+        ("Income:Uncategorized", "Income"),
+    ]:
+        row = db.fetchone("SELECT id FROM accounts WHERE name = ?", (name,))
+        if row is None:
+            cursor = db.execute(
+                "INSERT INTO accounts (name, type, currency, opened_at) VALUES (?, ?, ?, ?)",
+                (name, acct_type, "USD", now),
+            )
+            accounts[name] = cursor.lastrowid
+        else:
+            accounts[name] = row["id"]
+
+    c1 = db.execute(
+        "INSERT INTO source_files (path, original_path, sha256, file_type, imported_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        ("2024/bankA.csv", "/tmp/bankA.csv", "sha_source1", "csv", now),
+    )
+    sf1 = c1.lastrowid
+
+    c2 = db.execute(
+        "INSERT INTO source_files (path, original_path, sha256, file_type, imported_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        ("2024/bankB.csv", "/tmp/bankB.csv", "sha_source2", "csv", now),
+    )
+    sf2 = c2.lastrowid
+
+    db.conn.commit()
+    return sf1, sf2, accounts

@@ -12,6 +12,7 @@ from finkit.operations import (
     assert_balance,
     init_ledger,
     open_account,
+    recategorize_posting,
     submit_transaction,
     submit_transactions,
     undo_import,
@@ -515,3 +516,171 @@ def test_submit_transactions_undo(ledger_db):
 
     txn = ledger_db.fetchone("SELECT * FROM transactions WHERE uuid = ?", (uuids[0],))
     assert txn is None
+
+
+# ---------------------------------------------------------------------------
+# recategorize_posting tests
+# ---------------------------------------------------------------------------
+
+
+def test_recategorize_posting(ledger_db):
+    open_account(ledger_db, name="Assets:Chase:Checking", type="Assets")
+    open_account(ledger_db, name="Expenses:Uncategorized", type="Expenses")
+    open_account(ledger_db, name="Expenses:Groceries", type="Expenses")
+    ledger_db.conn.commit()
+
+    uuid = submit_transaction(
+        ledger_db,
+        date="2024-08-01",
+        payee="Whole Foods",
+        postings=[
+            {"account": "Assets:Chase:Checking", "amount": "-50.00", "currency": "USD"},
+            {"account": "Expenses:Uncategorized", "amount": "50.00", "currency": "USD"},
+        ],
+    )
+
+    recategorize_posting(ledger_db, uuid, "Expenses:Uncategorized", "Expenses:Groceries")
+
+    txn = ledger_db.fetchone("SELECT * FROM transactions WHERE uuid = ?", (uuid,))
+    postings = ledger_db.fetchall(
+        "SELECT p.*, a.name AS account_name FROM postings p JOIN accounts a ON p.account_id = a.id "
+        "WHERE p.transaction_id = ?",
+        (txn["id"],),
+    )
+    account_names = {p["account_name"] for p in postings}
+    assert "Expenses:Groceries" in account_names
+    assert "Expenses:Uncategorized" not in account_names
+
+
+def test_recategorize_posting_not_found(ledger_db):
+    with pytest.raises(ValueError, match="not found"):
+        recategorize_posting(ledger_db, "deadbeef", "X", "Y")
+
+
+def test_recategorize_posting_no_match(ledger_db):
+    open_account(ledger_db, name="Assets:Chase:Checking", type="Assets")
+    open_account(ledger_db, name="Expenses:Dining", type="Expenses")
+    open_account(ledger_db, name="Expenses:Groceries", type="Expenses")
+    open_account(ledger_db, name="Expenses:Travel", type="Expenses")
+    ledger_db.conn.commit()
+
+    uuid = submit_transaction(
+        ledger_db,
+        date="2024-08-02",
+        payee="Restaurant",
+        postings=[
+            {"account": "Assets:Chase:Checking", "amount": "-30.00", "currency": "USD"},
+            {"account": "Expenses:Dining", "amount": "30.00", "currency": "USD"},
+        ],
+    )
+
+    with pytest.raises(ValueError, match="No posting to"):
+        recategorize_posting(ledger_db, uuid, "Expenses:Groceries", "Expenses:Travel")
+
+
+def test_recategorize_posting_multiple_match(ledger_db):
+    open_account(ledger_db, name="Assets:Chase:Checking", type="Assets")
+    open_account(ledger_db, name="Expenses:Uncategorized", type="Expenses")
+    ledger_db.conn.commit()
+
+    uuid = submit_transaction(
+        ledger_db,
+        date="2024-08-03",
+        payee="Split Transaction",
+        postings=[
+            {"account": "Assets:Chase:Checking", "amount": "-100.00", "currency": "USD"},
+            {"account": "Expenses:Uncategorized", "amount": "60.00", "currency": "USD"},
+            {"account": "Expenses:Uncategorized", "amount": "40.00", "currency": "USD"},
+        ],
+    )
+
+    with pytest.raises(ValueError, match="Multiple postings"):
+        recategorize_posting(ledger_db, uuid, "Expenses:Uncategorized", "Expenses:Groceries")
+
+
+def test_recategorize_posting_by_id(ledger_db):
+    open_account(ledger_db, name="Assets:Chase:Checking", type="Assets")
+    open_account(ledger_db, name="Expenses:Uncategorized", type="Expenses")
+    open_account(ledger_db, name="Expenses:Groceries", type="Expenses")
+    ledger_db.conn.commit()
+
+    uuid = submit_transaction(
+        ledger_db,
+        date="2024-08-04",
+        payee="Split Store",
+        postings=[
+            {"account": "Assets:Chase:Checking", "amount": "-100.00", "currency": "USD"},
+            {"account": "Expenses:Uncategorized", "amount": "60.00", "currency": "USD"},
+            {"account": "Expenses:Uncategorized", "amount": "40.00", "currency": "USD"},
+        ],
+    )
+
+    txn = ledger_db.fetchone("SELECT id FROM transactions WHERE uuid = ?", (uuid,))
+    postings = ledger_db.fetchall(
+        "SELECT id, amount FROM postings WHERE transaction_id = ? AND account_id = "
+        "(SELECT id FROM accounts WHERE name = 'Expenses:Uncategorized') ORDER BY id",
+        (txn["id"],),
+    )
+    target_id = postings[0]["id"]
+
+    recategorize_posting(ledger_db, uuid, "Expenses:Uncategorized", "Expenses:Groceries", posting_id=target_id)
+
+    updated = ledger_db.fetchone(
+        "SELECT a.name FROM postings p JOIN accounts a ON p.account_id = a.id WHERE p.id = ?",
+        (target_id,),
+    )
+    assert updated["name"] == "Expenses:Groceries"
+
+    other = ledger_db.fetchone(
+        "SELECT a.name FROM postings p JOIN accounts a ON p.account_id = a.id WHERE p.id = ?",
+        (postings[1]["id"],),
+    )
+    assert other["name"] == "Expenses:Uncategorized"
+
+
+def test_recategorize_posting_lot_tracked(ledger_db):
+    open_account(
+        ledger_db, name="Assets:Fidelity:Brokerage", type="Assets",
+        booking_method="FIFO",
+    )
+    open_account(ledger_db, name="Expenses:Uncategorized", type="Expenses")
+    open_account(ledger_db, name="Expenses:Groceries", type="Expenses")
+    ledger_db.conn.commit()
+
+    uuid = submit_transaction(
+        ledger_db,
+        date="2024-08-05",
+        payee="Test",
+        postings=[
+            {"account": "Expenses:Uncategorized", "amount": "100.00", "currency": "USD"},
+            {"account": "Expenses:Groceries", "amount": "-100.00", "currency": "USD"},
+        ],
+    )
+
+    with pytest.raises(ValueError, match="lot-tracked"):
+        recategorize_posting(ledger_db, uuid, "Expenses:Groceries", "Assets:Fidelity:Brokerage")
+
+
+def test_recategorize_posting_modified_at(ledger_db):
+    open_account(ledger_db, name="Assets:Chase:Checking", type="Assets")
+    open_account(ledger_db, name="Expenses:Uncategorized", type="Expenses")
+    open_account(ledger_db, name="Expenses:Groceries", type="Expenses")
+    ledger_db.conn.commit()
+
+    uuid = submit_transaction(
+        ledger_db,
+        date="2024-08-06",
+        payee="Store",
+        postings=[
+            {"account": "Assets:Chase:Checking", "amount": "-25.00", "currency": "USD"},
+            {"account": "Expenses:Uncategorized", "amount": "25.00", "currency": "USD"},
+        ],
+    )
+
+    txn_before = ledger_db.fetchone("SELECT modified_at FROM transactions WHERE uuid = ?", (uuid,))
+    assert txn_before["modified_at"] is None
+
+    recategorize_posting(ledger_db, uuid, "Expenses:Uncategorized", "Expenses:Groceries")
+
+    txn_after = ledger_db.fetchone("SELECT modified_at FROM transactions WHERE uuid = ?", (uuid,))
+    assert txn_after["modified_at"] is not None

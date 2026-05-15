@@ -42,6 +42,7 @@ class Transaction:
     date: str = ""
     payee: str | None = None
     narration: str | None = None
+    normalized_payee: str | None = None
     status: str = "cleared"
     source_file_id: int | None = None
     raw_extraction_id: int | None = None
@@ -170,3 +171,27 @@ class RecurringTransaction:
 class CurrencyTolerance:
     currency: str = "USD"
     tolerance: Decimal = Decimal("0.01")
+
+
+@dataclass
+class PayeeNormalizationRule:
+    id: int | None = None
+    pattern: str = ""
+    pattern_type: str = "substring"
+    canonical_name: str = ""
+    priority: int = 0
+    created_at: str = ""
+
+
+@dataclass
+class DocumentTemplate:
+    id: int | None = None
+    name: str = ""
+    institution: str | None = None
+    document_type: str = ""
+    match_keywords: list[str] = field(default_factory=list)
+    template_json: dict = field(default_factory=dict)
+    account_mapping: dict | None = None
+    created_at: str = ""
+    last_used_at: str | None = None
+    use_count: int = 0

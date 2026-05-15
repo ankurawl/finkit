@@ -8,7 +8,7 @@ from typing import Any, Iterator
 
 from finkit.config import Settings
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _CORE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     date TEXT NOT NULL,
     payee TEXT,
     narration TEXT,
+    normalized_payee TEXT,
     status TEXT DEFAULT 'cleared',
     source_file_id INTEGER REFERENCES source_files(id),
     raw_extraction_id INTEGER REFERENCES raw_extractions(id),
@@ -188,6 +189,28 @@ CREATE TABLE IF NOT EXISTS budgets (
     currency TEXT NOT NULL,
     PRIMARY KEY (account_id, year_month, currency)
 ) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS payee_normalization_rules (
+    id INTEGER PRIMARY KEY,
+    pattern TEXT NOT NULL,
+    pattern_type TEXT DEFAULT 'substring',
+    canonical_name TEXT NOT NULL,
+    priority INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS document_templates (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    institution TEXT,
+    document_type TEXT NOT NULL,
+    match_keywords TEXT NOT NULL,
+    template_json TEXT NOT NULL,
+    account_mapping TEXT,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT,
+    use_count INTEGER DEFAULT 0
+);
 """
 
 _SUMMARY_SCHEMA = """
@@ -307,7 +330,7 @@ class Database:
         conn.execute("BEGIN")
         conn.execute(
             "INSERT OR IGNORE INTO schema_version (version, applied_at, description) VALUES (?, ?, ?)",
-            (SCHEMA_VERSION, now, "Initial schema"),
+            (SCHEMA_VERSION, now, "Initial schema with v2 tables"),
         )
         conn.execute("COMMIT")
 
@@ -358,11 +381,51 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def ensure_schema_v2(db: Database) -> None:
+    row = db.conn.execute("SELECT MAX(version) as v FROM schema_version").fetchone()
+    current = row[0] if row else 0
+    if current >= 2:
+        return
+    db.conn.executescript("""
+        CREATE TABLE IF NOT EXISTS payee_normalization_rules (
+            id INTEGER PRIMARY KEY,
+            pattern TEXT NOT NULL,
+            pattern_type TEXT DEFAULT 'substring',
+            canonical_name TEXT NOT NULL,
+            priority INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS document_templates (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            institution TEXT,
+            document_type TEXT NOT NULL,
+            match_keywords TEXT NOT NULL,
+            template_json TEXT NOT NULL,
+            account_mapping TEXT,
+            created_at TEXT NOT NULL,
+            last_used_at TEXT,
+            use_count INTEGER DEFAULT 0
+        );
+    """)
+    try:
+        db.conn.execute("ALTER TABLE transactions ADD COLUMN normalized_payee TEXT")
+    except sqlite3.OperationalError:
+        pass
+    now = _now_iso()
+    db.conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version, applied_at, description) VALUES (?, ?, ?)",
+        (2, now, "payee normalization + document templates"),
+    )
+    db.conn.commit()
+
+
 @contextmanager
 def get_db(settings: Settings) -> Iterator[Database]:
     db = Database(settings.db_path)
     try:
         db.connect()
+        ensure_schema_v2(db)
         yield db
     finally:
         db.close()

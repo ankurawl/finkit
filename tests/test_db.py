@@ -53,6 +53,8 @@ _CORE_TABLES = [
     "budgets",
     "transaction_tags",
     "schema_version",
+    "payee_normalization_rules",
+    "document_templates",
 ]
 
 
@@ -120,7 +122,7 @@ def test_indexes_exist(db):
 def test_schema_version(db):
     row = db.fetchone("SELECT version FROM schema_version WHERE version = ?", (SCHEMA_VERSION,))
     assert row is not None
-    assert row["version"] == 1
+    assert row["version"] == SCHEMA_VERSION
 
 
 def test_transaction_rollback(db):

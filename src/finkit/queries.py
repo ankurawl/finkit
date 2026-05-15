@@ -129,7 +129,7 @@ def get_transactions(
         conditions.append("t.date <= ?")
         params.append(date_to)
     if payee is not None:
-        conditions.append("t.payee LIKE ?")
+        conditions.append("COALESCE(t.normalized_payee, t.payee) LIKE ?")
         params.append(f"%{payee}%")
     if uuid is not None:
         conditions.append("t.uuid = ?")
@@ -171,7 +171,8 @@ def get_transactions(
 
     sql = f"""
         SELECT DISTINCT t.id, t.uuid, t.date, t.payee, t.narration,
-               t.status, t.source_file_id, t.created_at, t.modified_at
+               t.normalized_payee, t.status, t.source_file_id,
+               t.created_at, t.modified_at
         FROM transactions t
         {join_clause}
         {where_clause}
@@ -228,6 +229,7 @@ def get_transactions(
             "date": txn_row["date"],
             "payee": txn_row["payee"],
             "narration": txn_row["narration"],
+            "normalized_payee": txn_row["normalized_payee"],
             "status": txn_row["status"],
             "source_file_id": txn_row["source_file_id"],
             "created_at": txn_row["created_at"],

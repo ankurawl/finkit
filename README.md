@@ -11,7 +11,7 @@ FinKit uses a SQLite-canonical architecture with an extensible summary layer, ex
 - **Lot tracking with capital gains** --- per-lot cost basis using FIFO, LIFO, or HIFO selection. Automatic holding period classification (short-term vs long-term) based on jurisdiction rules. Wash sale detection for US tax reporting.
 - **Statement import** --- ingest CSV, XLSX, and PDF bank/brokerage statements. SHA-256 dedup ensures re-importing the same file is a no-op. Original files are copied, never moved or deleted.
 - **Summary layer** --- pre-computed tables (daily balances, monthly spending, portfolio holdings, net worth, capital gains) are updated atomically on every write and rebuilt on demand.
-- **MCP server** --- 20 tools for LLM integration. Point Claude, GPT, or any MCP-compatible client at the server for natural-language financial queries.
+- **MCP server** --- 39 tools for LLM integration. Point Claude, GPT, or any MCP-compatible client at the server for natural-language financial queries.
 - **CLI** --- every MCP tool has a matching CLI subcommand. No LLM required for any operation.
 - **Rule-based categorization** --- pattern matching (substring, regex, exact) to auto-categorize transactions. Optional Ollama integration for LLM-assisted categorization.
 - **Market data** --- fetch stock/ETF prices via yfinance, crypto via CoinGecko, forex via exchange rate APIs. Manual price entry for unlisted assets.
@@ -20,7 +20,7 @@ FinKit uses a SQLite-canonical architecture with an extensible summary layer, ex
 ## Architecture
 
 ```
-User <-> LLM <-> MCP Server (20 tools) <-> Python Core <-> SQLite + File Archive
+User <-> LLM <-> MCP Server (39 tools) <-> Python Core <-> SQLite + File Archive
                                                 |
                                          All computation
                                          happens here
@@ -101,6 +101,19 @@ finkit query "SELECT * FROM s_monthly_spending WHERE year_month = '2025-01'"
 | `finkit categorize` | Manage categorization rules (add/remove/list) |
 | `finkit corporate-action` | Record a stock split or other corporate action |
 | `finkit undo-import` | Reverse a file import |
+| `finkit recategorize-posting` | Change one posting's account on a transaction |
+| `finkit batch-recategorize` | Recategorize all transactions matching a payee pattern |
+| `finkit payee-rules` | Manage payee normalization rules (add/remove/list) |
+| `finkit normalize-payees` | Apply normalization rules to existing transactions |
+| `finkit find-duplicates` | Find potential duplicate transactions across sources |
+| `finkit merge-duplicates` | Merge two duplicate transactions |
+| `finkit detect-transfers` | Detect potential inter-account transfers |
+| `finkit link-transfer` | Link two transfer transactions |
+| `finkit import-report` | Generate post-import health report |
+| `finkit learn-template` | Extract text from a document for template creation |
+| `finkit apply-template` | Apply a template to extract transactions |
+| `finkit list-templates` | List saved document templates |
+| `finkit delete-template` | Delete a document template |
 | `finkit rebuild` | Rebuild all summary tables from core data |
 | `finkit backup` | Create a database backup using SQLite backup API |
 
@@ -108,15 +121,13 @@ All commands accept `--data-dir` to override the default data directory (`~/fina
 
 ## MCP Server
 
-The MCP server exposes 20 tools to any MCP-compatible LLM client. For Claude Code, it auto-configures via `.mcp.json` — just open the project and the tools are available.
+The MCP server exposes 39 tools to any MCP-compatible LLM client. For Claude Code, it auto-configures via `.mcp.json` — just open the project and the tools are available.
 
 For other MCP clients, start the server manually:
 
 ```bash
 python -m finkit.mcp.server
 ```
-
-The server exposes 20 tools: `init_ledger`, `open_account`, `submit_transaction`, `amend_transaction`, `assert_balance`, `query`, `get_balances`, `get_transactions`, `import_file`, `import_pdf`, `fetch_prices`, `analyze_spending`, `analyze_portfolio`, `report_capital_gains`, `what_if_sell`, `export`, `categorize`, `corporate_action`, `undo_import`, and `import_directory`.
 
 The `query` tool enforces read-only access with `PRAGMA query_only = ON`.
 

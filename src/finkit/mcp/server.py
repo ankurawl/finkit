@@ -19,6 +19,8 @@ def _get_db() -> Database:
         _settings = load_settings()
         _db = Database(_settings.db_path)
         _db.connect()
+        from finkit.db import ensure_schema_v2
+        ensure_schema_v2(_db)
     return _db
 
 
@@ -445,6 +447,47 @@ def corporate_action(
 
 
 @mcp.tool()
+def recategorize_posting(
+    uuid: Annotated[str, "8-char hex UUID of the transaction"],
+    old_account: Annotated[str, "Current account name of the posting to change"],
+    new_account: Annotated[str, "New account name to assign (fuzzy match OK)"],
+    posting_id: Annotated[int | None, "Target a specific posting ID when multiple postings share the same account"] = None,
+) -> dict:
+    """Change one posting's account without rebuilding all postings. Only changes the account — amounts stay the same."""
+    try:
+        from finkit.operations import recategorize_posting as _recategorize_posting
+
+        db = _get_db()
+        _recategorize_posting(db, uuid=uuid, old_account=old_account, new_account=new_account, posting_id=posting_id)
+        return {"status": "ok", "uuid": uuid, "old_account": old_account, "new_account": new_account}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def batch_recategorize(
+    pattern: Annotated[str, "Payee pattern to match"],
+    old_account: Annotated[str, "Current account name of postings to change"],
+    new_account: Annotated[str, "New account name to assign"],
+    pattern_type: Annotated[str, "Match type: substring, regex, or exact"] = "substring",
+    dry_run: Annotated[bool, "If true, preview matches without changing anything"] = True,
+) -> dict:
+    """Recategorize all transactions matching a payee pattern from one account to another."""
+    try:
+        db = _get_db()
+        if dry_run:
+            from finkit.categorize.batch import find_matching_transactions
+            matches = find_matching_transactions(db, pattern, pattern_type, old_account)
+            return {"status": "dry_run", "count": len(matches), "matches": matches}
+        else:
+            from finkit.operations import batch_recategorize as _batch_recategorize
+            count = _batch_recategorize(db, pattern, pattern_type, old_account, new_account)
+            return {"status": "ok", "updated": count, "old_account": old_account, "new_account": new_account}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
 def undo_import(
     source_file_id: Annotated[int, "ID of the source file whose import to reverse"],
 ) -> dict:
@@ -454,6 +497,121 @@ def undo_import(
 
         db = _get_db()
         return _undo_import(db, source_file_id=source_file_id)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def payee_rules(
+    action: Annotated[str, "Action: add, remove, or list"],
+    pattern: Annotated[str | None, "Payee pattern to match (required for add)"] = None,
+    canonical_name: Annotated[str | None, "Canonical payee name (required for add)"] = None,
+    pattern_type: Annotated[str, "Match type: substring, regex, or exact"] = "substring",
+    priority: Annotated[int, "Rule priority (higher = checked first)"] = 0,
+    rule_id: Annotated[int | None, "Rule ID to remove (required for remove)"] = None,
+) -> dict:
+    """Manage payee normalization rules. Maps raw bank payees to clean canonical names."""
+    try:
+        from finkit.categorize.payee_normalizer import manage_payee_rules
+
+        db = _get_db()
+        return manage_payee_rules(
+            db, action=action, pattern=pattern, canonical_name=canonical_name,
+            pattern_type=pattern_type, priority=priority, rule_id=rule_id,
+        )
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def normalize_existing_payees(
+    dry_run: Annotated[bool, "If true, preview changes without applying"] = True,
+) -> dict:
+    """Apply payee normalization rules to all existing transactions retroactively."""
+    try:
+        from finkit.categorize.payee_normalizer import normalize_existing_payees as _normalize
+
+        db = _get_db()
+        return _normalize(db, dry_run=dry_run)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def find_duplicates(
+    tolerance_days: Annotated[int, "Date window for matching (default 3)"] = 3,
+    tolerance_amount: Annotated[float, "Amount tolerance for matching (default 0.01)"] = 0.01,
+    account_name: Annotated[str | None, "Filter by account name"] = None,
+) -> dict:
+    """Find potential duplicate transactions across different source files."""
+    try:
+        from finkit.analysis.duplicates import find_duplicates as _find_duplicates
+
+        db = _get_db()
+        dupes = _find_duplicates(db, tolerance_days=tolerance_days, tolerance_amount=tolerance_amount, account_name=account_name)
+        return {"status": "ok", "count": len(dupes), "duplicates": dupes}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def merge_duplicates(
+    keep_uuid: Annotated[str, "UUID of the transaction to keep"],
+    delete_uuid: Annotated[str, "UUID of the duplicate transaction to delete"],
+    enrich: Annotated[bool, "Copy metadata (payee, narration, tags) from deleted to kept"] = False,
+) -> dict:
+    """Merge two duplicate transactions by keeping one and deleting the other."""
+    try:
+        from finkit.operations import merge_duplicates as _merge_duplicates
+
+        db = _get_db()
+        _merge_duplicates(db, keep_uuid=keep_uuid, delete_uuid=delete_uuid, enrich=enrich)
+        return {"status": "ok", "kept": keep_uuid, "deleted": delete_uuid}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def detect_transfers(
+    tolerance_days: Annotated[int, "Date window for matching transfer pairs"] = 3,
+) -> dict:
+    """Detect potential inter-account transfers that appear as two separate transactions."""
+    try:
+        from finkit.analysis.transfers import detect_transfers as _detect_transfers
+
+        db = _get_db()
+        transfers = _detect_transfers(db, tolerance_days=tolerance_days)
+        return {"status": "ok", "count": len(transfers), "transfers": transfers}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def link_transfer(
+    uuid_from: Annotated[str, "UUID of the outgoing transfer transaction to keep"],
+    uuid_to: Annotated[str, "UUID of the incoming transfer transaction to merge and delete"],
+) -> dict:
+    """Link two transfer transactions: keeps uuid_from, replaces its Uncategorized posting with the real account from uuid_to, deletes uuid_to."""
+    try:
+        from finkit.operations import link_transfer as _link_transfer
+
+        db = _get_db()
+        _link_transfer(db, uuid_from=uuid_from, uuid_to=uuid_to)
+        return {"status": "ok", "kept": uuid_from, "deleted": uuid_to}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def import_report(
+    source_file_id: Annotated[int | None, "Filter report to a specific source file ID"] = None,
+) -> dict:
+    """Generate a post-import health report: uncategorized transactions, potential duplicates, balance anomalies, and missing periods."""
+    try:
+        from finkit.analysis.import_report import import_report as _import_report
+
+        db = _get_db()
+        return _import_report(db, source_file_id=source_file_id)
     except Exception as e:
         return {"error": str(e)}
 
@@ -560,6 +718,110 @@ def tax_readiness_report(
         if year is None:
             year = datetime.now().year - 1
         return _tax_readiness_report(db, year=year, jurisdiction=jurisdiction)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def learn_template(
+    file_path: Annotated[str, "Path to a sample document to learn from"],
+    template_name: Annotated[str, "Name for the new template"],
+    institution: Annotated[str | None, "Institution name"] = None,
+    password: Annotated[str | None, "Password for encrypted PDFs"] = None,
+) -> dict:
+    """Extract text from a document and return instructions for creating a template.
+    The LLM should examine the text and call save_document_template with regex patterns."""
+    try:
+        from finkit.importers.template_engine import learn_template as _learn_template
+
+        db = _get_db()
+        settings = _get_settings()
+        return _learn_template(db, file_path=file_path, template_name=template_name,
+                               institution=institution, password=password, settings=settings)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def save_document_template(
+    name: Annotated[str, "Unique template name"],
+    document_type: Annotated[str, "Document type: bank_statement, cc_statement, payslip, tax_form, etc."],
+    match_keywords: Annotated[list[str], "Keywords that identify this document type in extracted text"],
+    template_json: Annotated[dict, "Extraction patterns: {mode, sections/fields, ...}"],
+    account_mapping: Annotated[dict | None, "Field-to-account mapping: {field: {account, sign, currency}}"] = None,
+    institution: Annotated[str | None, "Institution name"] = None,
+) -> dict:
+    """Save a document template for automated extraction. Used after learn_template."""
+    try:
+        from finkit.importers.template_store import save_template
+        from finkit.models import DocumentTemplate
+
+        db = _get_db()
+        template = DocumentTemplate(
+            name=name, institution=institution, document_type=document_type,
+            match_keywords=match_keywords, template_json=template_json,
+            account_mapping=account_mapping,
+        )
+        template_id = save_template(db, template)
+        return {"status": "ok", "template_id": template_id, "name": name}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def apply_template(
+    file_path: Annotated[str, "Path to the document to process"],
+    template_name: Annotated[str | None, "Template name to use (auto-detected if omitted)"] = None,
+    password: Annotated[str | None, "Password for encrypted PDFs"] = None,
+    dry_run: Annotated[bool, "If true, preview extracted transactions without submitting"] = True,
+) -> dict:
+    """Apply a document template to extract and submit transactions from a document."""
+    try:
+        from finkit.importers.template_engine import apply_template as _apply_template
+
+        db = _get_db()
+        settings = _get_settings()
+        return _apply_template(db, file_path=file_path, template_name=template_name,
+                               password=password, dry_run=dry_run, settings=settings)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def list_templates(
+    institution: Annotated[str | None, "Filter by institution"] = None,
+) -> dict:
+    """List all saved document templates."""
+    try:
+        from finkit.importers.template_store import list_templates as _list_templates
+
+        db = _get_db()
+        templates = _list_templates(db, institution=institution)
+        return {
+            "status": "ok",
+            "count": len(templates),
+            "templates": [
+                {"name": t.name, "institution": t.institution,
+                 "document_type": t.document_type, "use_count": t.use_count,
+                 "last_used_at": t.last_used_at}
+                for t in templates
+            ],
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def delete_template(
+    name: Annotated[str, "Name of the template to delete"],
+) -> dict:
+    """Delete a document template."""
+    try:
+        from finkit.importers.template_store import delete_template as _delete_template
+
+        db = _get_db()
+        deleted = _delete_template(db, name)
+        return {"status": "ok", "deleted": deleted}
     except Exception as e:
         return {"error": str(e)}
 

@@ -60,6 +60,7 @@ def cmd_submit(args: argparse.Namespace) -> None:
             narration=args.narration,
             tags=tags,
             status=args.status,
+            source_file_id=args.source_file_id,
             settings=settings,
         )
     _output({"uuid": uuid})
@@ -358,6 +359,166 @@ def cmd_undo_import(args: argparse.Namespace) -> None:
     _output(result)
 
 
+def cmd_recategorize_posting(args: argparse.Namespace) -> None:
+    from finkit.operations import recategorize_posting
+
+    settings = load_settings(data_dir=args.data_dir)
+    with get_db(settings) as db:
+        recategorize_posting(
+            db,
+            uuid=args.uuid,
+            old_account=args.old_account,
+            new_account=args.new_account,
+            posting_id=args.posting_id,
+        )
+    _output({"status": "ok", "uuid": args.uuid})
+
+
+def cmd_batch_recategorize(args: argparse.Namespace) -> None:
+    settings = load_settings(data_dir=args.data_dir)
+    with get_db(settings) as db:
+        if args.dry_run:
+            from finkit.categorize.batch import find_matching_transactions
+            matches = find_matching_transactions(
+                db, args.pattern, args.pattern_type, args.old_account,
+            )
+            _output({"status": "dry_run", "count": len(matches), "matches": matches})
+        else:
+            from finkit.operations import batch_recategorize
+            count = batch_recategorize(
+                db, args.pattern, args.pattern_type, args.old_account, args.new_account,
+            )
+            _output({"status": "ok", "updated": count})
+
+
+def cmd_payee_rules(args: argparse.Namespace) -> None:
+    from finkit.categorize.payee_normalizer import manage_payee_rules
+
+    settings = load_settings(data_dir=args.data_dir)
+    with get_db(settings) as db:
+        if args.payee_rules_command == "add":
+            result = manage_payee_rules(
+                db, action="add", pattern=args.pattern,
+                canonical_name=args.canonical_name,
+                pattern_type=args.pattern_type, priority=args.priority,
+            )
+        elif args.payee_rules_command == "remove":
+            result = manage_payee_rules(db, action="remove", rule_id=args.rule_id)
+        elif args.payee_rules_command == "list":
+            result = manage_payee_rules(db, action="list")
+        else:
+            result = {"error": "Unknown subcommand"}
+    _output(result)
+
+
+def cmd_normalize_payees(args: argparse.Namespace) -> None:
+    from finkit.categorize.payee_normalizer import normalize_existing_payees
+
+    settings = load_settings(data_dir=args.data_dir)
+    with get_db(settings) as db:
+        result = normalize_existing_payees(db, dry_run=args.dry_run)
+    _output(result)
+
+
+def cmd_find_duplicates(args: argparse.Namespace) -> None:
+    from finkit.analysis.duplicates import find_duplicates
+
+    settings = load_settings(data_dir=args.data_dir)
+    with get_db(settings) as db:
+        dupes = find_duplicates(
+            db, tolerance_days=args.days,
+            tolerance_amount=args.tolerance,
+            account_name=args.account,
+        )
+    _output({"count": len(dupes), "duplicates": dupes})
+
+
+def cmd_merge_duplicates(args: argparse.Namespace) -> None:
+    from finkit.operations import merge_duplicates
+
+    settings = load_settings(data_dir=args.data_dir)
+    with get_db(settings) as db:
+        merge_duplicates(
+            db, keep_uuid=args.keep_uuid,
+            delete_uuid=args.delete_uuid, enrich=args.enrich,
+        )
+    _output({"status": "ok", "kept": args.keep_uuid, "deleted": args.delete_uuid})
+
+
+def cmd_detect_transfers(args: argparse.Namespace) -> None:
+    from finkit.analysis.transfers import detect_transfers
+
+    settings = load_settings(data_dir=args.data_dir)
+    with get_db(settings) as db:
+        transfers = detect_transfers(db, tolerance_days=args.days)
+    _output({"count": len(transfers), "transfers": transfers})
+
+
+def cmd_link_transfer(args: argparse.Namespace) -> None:
+    from finkit.operations import link_transfer
+
+    settings = load_settings(data_dir=args.data_dir)
+    with get_db(settings) as db:
+        link_transfer(db, uuid_from=args.uuid_from, uuid_to=args.uuid_to)
+    _output({"status": "ok", "kept": args.uuid_from, "deleted": args.uuid_to})
+
+
+def cmd_import_report(args: argparse.Namespace) -> None:
+    from finkit.analysis.import_report import import_report
+
+    settings = load_settings(data_dir=args.data_dir)
+    with get_db(settings) as db:
+        result = import_report(db, source_file_id=args.source_file_id)
+    _output(result)
+
+
+def cmd_learn_template(args: argparse.Namespace) -> None:
+    from finkit.importers.template_engine import learn_template
+
+    settings = load_settings(data_dir=args.data_dir)
+    with get_db(settings) as db:
+        result = learn_template(
+            db, file_path=args.file_path, template_name=args.name,
+            institution=args.institution, password=args.password,
+            settings=settings,
+        )
+    _output(result)
+
+
+def cmd_apply_template(args: argparse.Namespace) -> None:
+    from finkit.importers.template_engine import apply_template
+
+    settings = load_settings(data_dir=args.data_dir)
+    with get_db(settings) as db:
+        result = apply_template(
+            db, file_path=args.file_path, template_name=args.template,
+            password=args.password, dry_run=args.dry_run, settings=settings,
+        )
+    _output(result)
+
+
+def cmd_list_templates(args: argparse.Namespace) -> None:
+    from finkit.importers.template_store import list_templates
+
+    settings = load_settings(data_dir=args.data_dir)
+    with get_db(settings) as db:
+        templates = list_templates(db, institution=args.institution)
+    _output([
+        {"name": t.name, "institution": t.institution,
+         "document_type": t.document_type, "use_count": t.use_count}
+        for t in templates
+    ])
+
+
+def cmd_delete_template(args: argparse.Namespace) -> None:
+    from finkit.importers.template_store import delete_template
+
+    settings = load_settings(data_dir=args.data_dir)
+    with get_db(settings) as db:
+        deleted = delete_template(db, args.name)
+    _output({"status": "ok", "deleted": deleted})
+
+
 def cmd_rebuild(args: argparse.Namespace) -> None:
     from finkit.summaries.registry import SummaryRegistry
 
@@ -424,6 +585,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--postings", required=True, help="JSON array of posting objects")
     p.add_argument("--tags", default=None, help="Comma-separated tags")
     p.add_argument("--status", default="cleared")
+    p.add_argument("--source-file-id", type=int, default=None, help="Source file ID for provenance")
 
     # amend
     p = sub.add_parser("amend", help="Amend or delete a transaction")
@@ -553,6 +715,87 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("undo-import", help="Undo a file import")
     p.add_argument("source_file_id", type=int, help="Source file ID to undo")
 
+    # recategorize-posting
+    p = sub.add_parser("recategorize-posting", help="Change one posting's account on a transaction")
+    p.add_argument("uuid", help="Transaction UUID")
+    p.add_argument("--old-account", required=True, help="Current account name of the posting")
+    p.add_argument("--new-account", required=True, help="New account name to assign")
+    p.add_argument("--posting-id", type=int, default=None, help="Target a specific posting ID")
+
+    # batch-recategorize
+    p = sub.add_parser("batch-recategorize", help="Recategorize all transactions matching a payee pattern")
+    p.add_argument("pattern", help="Payee pattern to match")
+    p.add_argument("--old-account", required=True, dest="old_account", help="Current account name")
+    p.add_argument("--new-account", required=True, dest="new_account", help="New account name")
+    p.add_argument("--pattern-type", default="substring", choices=["substring", "regex", "exact"])
+    p.add_argument("--dry-run", action="store_true", default=False, help="Preview matches without changing")
+
+    # payee-rules
+    p = sub.add_parser("payee-rules", help="Manage payee normalization rules")
+    payee_sub = p.add_subparsers(dest="payee_rules_command")
+
+    p_add = payee_sub.add_parser("add", help="Add a normalization rule")
+    p_add.add_argument("pattern", help="Pattern to match in raw payee")
+    p_add.add_argument("canonical_name", help="Clean canonical name")
+    p_add.add_argument("--pattern-type", default="substring", choices=["substring", "regex", "exact"])
+    p_add.add_argument("--priority", type=int, default=0)
+
+    p_rm = payee_sub.add_parser("remove", help="Remove a normalization rule")
+    p_rm.add_argument("rule_id", type=int, help="Rule ID to remove")
+
+    payee_sub.add_parser("list", help="List normalization rules")
+
+    # normalize-payees
+    p = sub.add_parser("normalize-payees", help="Apply normalization rules to existing transactions")
+    p.add_argument("--dry-run", action="store_true", default=False, help="Preview without applying")
+
+    # find-duplicates
+    p = sub.add_parser("find-duplicates", help="Find potential duplicate transactions across sources")
+    p.add_argument("--days", type=int, default=3, help="Date tolerance in days")
+    p.add_argument("--tolerance", type=float, default=0.01, help="Amount tolerance")
+    p.add_argument("--account", default=None, help="Filter by account name")
+
+    # merge-duplicates
+    p = sub.add_parser("merge-duplicates", help="Merge two duplicate transactions")
+    p.add_argument("keep_uuid", help="UUID of transaction to keep")
+    p.add_argument("delete_uuid", help="UUID of duplicate to delete")
+    p.add_argument("--enrich", action="store_true", default=False, help="Copy metadata from deleted to kept")
+
+    # detect-transfers
+    p = sub.add_parser("detect-transfers", help="Detect potential inter-account transfers")
+    p.add_argument("--days", type=int, default=3, help="Date tolerance in days")
+
+    # link-transfer
+    p = sub.add_parser("link-transfer", help="Link two transfer transactions")
+    p.add_argument("uuid_from", help="UUID of outgoing transaction to keep")
+    p.add_argument("uuid_to", help="UUID of incoming transaction to merge and delete")
+
+    # import-report
+    p = sub.add_parser("import-report", help="Generate post-import health report")
+    p.add_argument("source_file_id", nargs="?", type=int, default=None, help="Filter to a specific source file")
+
+    # learn-template
+    p = sub.add_parser("learn-template", help="Extract text from a document for template creation")
+    p.add_argument("file_path", help="Path to the sample document")
+    p.add_argument("name", help="Name for the new template")
+    p.add_argument("--institution", default=None)
+    p.add_argument("--password", default=None)
+
+    # apply-template
+    p = sub.add_parser("apply-template", help="Apply a template to extract transactions from a document")
+    p.add_argument("file_path", help="Path to the document")
+    p.add_argument("--template", default=None, help="Template name (auto-detected if omitted)")
+    p.add_argument("--password", default=None)
+    p.add_argument("--dry-run", action="store_true", default=False)
+
+    # list-templates
+    p = sub.add_parser("list-templates", help="List saved document templates")
+    p.add_argument("--institution", default=None)
+
+    # delete-template
+    p = sub.add_parser("delete-template", help="Delete a document template")
+    p.add_argument("name", help="Template name to delete")
+
     # rebuild
     sub.add_parser("rebuild", help="Rebuild all summary tables from core data")
 
@@ -588,6 +831,19 @@ _COMMAND_HANDLERS = {
     "export": cmd_export,
     "corporate-action": cmd_corporate_action,
     "undo-import": cmd_undo_import,
+    "recategorize-posting": cmd_recategorize_posting,
+    "batch-recategorize": cmd_batch_recategorize,
+    "payee-rules": cmd_payee_rules,
+    "normalize-payees": cmd_normalize_payees,
+    "find-duplicates": cmd_find_duplicates,
+    "merge-duplicates": cmd_merge_duplicates,
+    "detect-transfers": cmd_detect_transfers,
+    "link-transfer": cmd_link_transfer,
+    "import-report": cmd_import_report,
+    "learn-template": cmd_learn_template,
+    "apply-template": cmd_apply_template,
+    "list-templates": cmd_list_templates,
+    "delete-template": cmd_delete_template,
     "rebuild": cmd_rebuild,
     "backup": cmd_backup,
     "accounts": cmd_accounts,
@@ -612,6 +868,11 @@ def main() -> None:
             "list": cmd_categorize_list,
         }
         handler = handler_map[args.categorize_command]
+    elif args.command == "payee-rules":
+        if not hasattr(args, "payee_rules_command") or args.payee_rules_command is None:
+            parser.parse_args(["payee-rules", "--help"])
+            sys.exit(1)
+        handler = cmd_payee_rules
     else:
         handler = _COMMAND_HANDLERS.get(args.command)
         if handler is None:

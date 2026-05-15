@@ -67,7 +67,8 @@ Living document tracking what's built, what's rough, and what could come next.
 
 - **20 tools** exposed via FastMCP: init_ledger, open_account, submit_transaction, amend_transaction, assert_balance, query, get_balances, get_transactions, import_file, import_pdf, import_directory, fetch_prices, analyze_spending, analyze_portfolio, report_capital_gains, what_if_sell, export, categorize, corporate_action, undo_import.
 - **5 additional tools** for document ingestion and tax workflows: ingest_document, submit_transactions, setup_payroll_accounts, reconcile_tax_document, tax_readiness_report.
-- **25 tools total** exposed via FastMCP.
+- **14 additional tools** for data quality and template engine: recategorize_posting, batch_recategorize, payee_rules, normalize_existing_payees, find_duplicates, merge_duplicates, detect_transfers, link_transfer, import_report, learn_template, save_document_template, apply_template, list_templates, delete_template.
+- **39 tools total** exposed via FastMCP.
 - **Auto-config** via `.mcp.json` at the project root -- MCP-compatible clients pick up the server automatically.
 - **Read-only query safety** -- the `query` tool enforces `PRAGMA query_only = ON` before executing user SQL.
 
@@ -80,9 +81,20 @@ Living document tracking what's built, what's rough, and what could come next.
 - **Tax document reconciliation** -- `reconcile_tax_document` compares W-2, 1099-INT, 1099-DIV, 1099-B, and Form 16 data against recorded transactions. Returns field-by-field comparisons with match/mismatch/missing status and suggested transactions for missing income.
 - **Tax readiness report** -- `tax_readiness_report` generates a comprehensive gap analysis for a tax year: income totals, taxes paid, capital gains, deductible expenses, and missing pay period detection.
 
+### Data Quality Utilities
+
+- **Posting-level amend** -- `recategorize_posting` changes one posting's account without rebuilding all postings. Supports disambiguation by posting ID for transactions with duplicate accounts.
+- **Batch recategorize** -- `batch_recategorize` recategorizes all transactions matching a payee pattern in a single operation. Supports substring, regex, and exact match patterns.
+- **Payee normalizer** -- `payee_rules` manages normalization rules that map raw bank payees (e.g., "ACH Deposit ACME 9876543210") to canonical names (e.g., "Acme"). `normalize_existing_payees` applies rules retroactively. Normalized names are stored in `normalized_payee` column, preserving the raw payee.
+- **Cross-source duplicate detector** -- `find_duplicates` detects potential duplicates across different source files using amount/date matching with configurable tolerances. `merge_duplicates` keeps one transaction and deletes the other, with optional metadata enrichment.
+- **Transfer detector and linker** -- `detect_transfers` finds inter-account transfers that appear as two separate transactions (one outgoing with Uncategorized, one incoming with Uncategorized). `link_transfer` merges them into a single A-to-B transaction.
+- **Import reconciliation report** -- `import_report` generates a post-import health report: uncategorized transactions, potential duplicates, balance anomalies (negative assets, positive liabilities), missing periods, and orphaned source files.
+- **Document template engine** -- learn-once-apply-forever document import. `learn_template` extracts text from a sample document for LLM-assisted pattern generation. `save_document_template` stores regex patterns and field-to-account mappings. `apply_template` auto-matches documents to templates and extracts transactions without LLM involvement. Supports table-mode (bank/CC statements) and field-mode (payslips, tax forms) extraction with confidence scoring.
+- **Schema migration** -- `ensure_schema_v2()` migrates existing databases to add `payee_normalization_rules`, `document_templates` tables, and `normalized_payee` column. Called automatically on connection.
+
 ### CLI
 
-- **24 subcommands** mirroring all MCP tools plus extras: `accounts`, `manual-price`, `rebuild`, `backup`.
+- **37 subcommands** mirroring all MCP tools plus extras: `accounts`, `manual-price`, `rebuild`, `backup`.
 - **Consistent interface** -- all commands accept `--data-dir` to override the default data directory. JSON output to stdout.
 - **Categorize sub-subcommands** -- `categorize add`, `categorize remove`, `categorize list`.
 
@@ -104,7 +116,7 @@ Living document tracking what's built, what's rough, and what could come next.
 
 ### Testing
 
-- **14 test files** covering: database operations, validation, balances, lots, prices, summaries, importers, PDF parsers, operations, queries, analysis, categorization, and integration.
+- **20 test files** covering: database operations, validation, balances, lots, prices, summaries, importers, PDF parsers, operations, queries, analysis, categorization, integration, payee normalization, batch recategorization, duplicates, transfers, import reports, and template engine.
 
 ---
 
@@ -169,7 +181,6 @@ Living document tracking what's built, what's rough, and what could come next.
 - Fix the float comparison in transaction dedup to use Decimal/TEXT comparison [small]
 - Wire Fidelity holdings import into the opening balance workflow [medium]
 - Implement the Frost Bank parser (or remove the stub) [small]
-- Schema migration framework for future schema changes beyond version 1 [medium]
 
 ### Multi-Currency and International
 

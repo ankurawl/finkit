@@ -110,7 +110,7 @@ class TestParseChaseCc:
 class TestParseCapitaloneCc:
     SAMPLE = (
         "Transactions\nVisit capitalone.com to see detailed transactions.\n"
-        "ANKUR AGGARWAL #7809: Transactions\n"
+        "JOHN DOE #1234: Transactions\n"
         "Trans Date Post Date Description Amount\n"
         "Jan 15 Jan 17 DELTA AIR 0067463899129 $168.50\n"
         "Jan 15 Jan 17 SOUTHWES 5267463900081 $360.51\n"
@@ -118,11 +118,11 @@ class TestParseCapitaloneCc:
     )
 
     def test_parses_transactions(self):
-        rows = parse_capitalone_cc(self.SAMPLE, "CC_CapitalOne_VentureX_xxx7809_-_2026_01")
+        rows = parse_capitalone_cc(self.SAMPLE, "CC_CapitalOne_VentureX_xxx1234_-_2026_01")
         assert len(rows) == 2
 
     def test_post_dates_used(self):
-        rows = parse_capitalone_cc(self.SAMPLE, "CC_CapitalOne_VentureX_xxx7809_-_2026_01")
+        rows = parse_capitalone_cc(self.SAMPLE, "CC_CapitalOne_VentureX_xxx1234_-_2026_01")
         assert rows[0]["date"] == "2026-01-17"
 
 
@@ -131,8 +131,8 @@ class TestParseCitiCc:
         "Payments, Credits and Adjustments\n"
         "01/10 AUTOPAY 999990000028267RAUTOPAY -$426.06\n"
         "Standard Purchases\n"
-        "12/14 12/14 COSTCO GAS #1152 CEDAR PARK TX $26.00\n"
-        "12/14 12/14 COSTCO WHSE #1152 CEDAR PARK TX $155.88\n"
+        "12/14 12/14 COSTCO GAS #1152 ROUND ROCK TX $26.00\n"
+        "12/14 12/14 COSTCO WHSE #1152 ROUND ROCK TX $155.88\n"
         "Fees Charged\n"
     )
 
@@ -163,12 +163,12 @@ class TestParseFidelity:
     )
 
     def test_parses_contributions(self):
-        rows = parse_fidelity(self.SAMPLE, "HSA_-_Fidelity_Ankur_-_2026_Jan")
+        rows = parse_fidelity(self.SAMPLE, "HSA_-_Fidelity_JohnD_-_2026_Jan")
         contribs = [r for r in rows if r["amount"] and not r["amount"].startswith("-")]
         assert len(contribs) >= 1
 
     def test_parses_distributions(self):
-        rows = parse_fidelity(self.SAMPLE, "HSA_-_Fidelity_Ankur_-_2026_Jan")
+        rows = parse_fidelity(self.SAMPLE, "HSA_-_Fidelity_JohnD_-_2026_Jan")
         dists = [r for r in rows if r["amount"].startswith("-")]
         assert len(dists) >= 1
 

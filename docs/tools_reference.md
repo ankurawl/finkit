@@ -751,3 +751,128 @@ List all accounts, optionally filtered by type.
 finkit accounts
 finkit accounts --type Assets
 ```
+
+---
+
+## New Utilities
+
+### recategorize_posting
+
+Change one posting's account without rebuilding all postings. Only changes the account — amounts stay the same.
+
+**MCP tool**: `recategorize_posting(uuid, old_account, new_account, posting_id?)`
+**CLI**: `finkit recategorize-posting UUID --old-account NAME --new-account NAME [--posting-id ID]`
+
+Parameters:
+- `uuid` — Transaction UUID
+- `old_account` — Current account name (exact match)
+- `new_account` — New account name (fuzzy match OK)
+- `posting_id` — Target a specific posting ID when multiple postings share the same account
+
+Refuses to operate on lot-tracked accounts (either old or new).
+
+### batch_recategorize
+
+Recategorize all transactions matching a payee pattern from one account to another.
+
+**MCP tool**: `batch_recategorize(pattern, old_account, new_account, pattern_type?, dry_run?)`
+**CLI**: `finkit batch-recategorize PATTERN --old-account OLD --new-account NEW [--pattern-type substring] [--dry-run]`
+
+Parameters:
+- `pattern` — Payee pattern to match
+- `old_account` — Current account name of postings to change
+- `new_account` — New account name to assign
+- `pattern_type` — Match type: substring (default), regex, or exact
+- `dry_run` — MCP default: true. CLI: use `--dry-run` flag
+
+### payee_rules
+
+Manage payee normalization rules. Maps raw bank payees to clean canonical names.
+
+**MCP tool**: `payee_rules(action, pattern?, canonical_name?, pattern_type?, priority?, rule_id?)`
+**CLI**: `finkit payee-rules add|remove|list ...`
+
+Actions:
+- `add` — Add a rule: `payee_rules(action="add", pattern="META 4100", canonical_name="Meta")`
+- `remove` — Remove by ID: `payee_rules(action="remove", rule_id=1)`
+- `list` — List all rules
+
+### normalize_existing_payees
+
+Apply payee normalization rules to all existing transactions retroactively. Sets `normalized_payee` column without overwriting the raw `payee`.
+
+**MCP tool**: `normalize_existing_payees(dry_run?)`
+**CLI**: `finkit normalize-payees [--dry-run]`
+
+### find_duplicates
+
+Find potential duplicate transactions across different source files.
+
+**MCP tool**: `find_duplicates(tolerance_days?, tolerance_amount?, account_name?)`
+**CLI**: `finkit find-duplicates [--days 3] [--tolerance 0.01] [--account NAME]`
+
+Returns pairs with confidence scoring: high (exact date + amount + payee), medium (amount match within date window).
+
+### merge_duplicates
+
+Merge two duplicate transactions by keeping one and deleting the other.
+
+**MCP tool**: `merge_duplicates(keep_uuid, delete_uuid, enrich?)`
+**CLI**: `finkit merge-duplicates KEEP_UUID DELETE_UUID [--enrich]`
+
+With `enrich=true`, copies metadata (payee, narration, tags) from the deleted transaction to the kept one.
+
+### detect_transfers
+
+Detect potential inter-account transfers that appear as two separate transactions (one outgoing, one incoming) with Uncategorized contra postings.
+
+**MCP tool**: `detect_transfers(tolerance_days?)`
+**CLI**: `finkit detect-transfers [--days 3]`
+
+### link_transfer
+
+Link two transfer transactions: keeps `uuid_from`, replaces its Uncategorized posting with the real account from `uuid_to`, deletes `uuid_to`.
+
+**MCP tool**: `link_transfer(uuid_from, uuid_to)`
+**CLI**: `finkit link-transfer UUID_FROM UUID_TO`
+
+### import_report
+
+Generate a post-import health report covering uncategorized transactions, potential duplicates, balance anomalies, missing periods, and orphaned source files.
+
+**MCP tool**: `import_report(source_file_id?)`
+**CLI**: `finkit import-report [SOURCE_FILE_ID]`
+
+### learn_template
+
+Extract text from a document and return instructions for creating a reusable template.
+
+**MCP tool**: `learn_template(file_path, template_name, institution?, password?)`
+**CLI**: `finkit learn-template FILE_PATH NAME [--institution INST] [--password PASS]`
+
+### save_document_template
+
+Save a document template for automated extraction. Used after `learn_template`.
+
+**MCP tool**: `save_document_template(name, document_type, match_keywords, template_json, account_mapping?, institution?)`
+
+### apply_template
+
+Apply a document template to extract and submit transactions from a document. Auto-detects the template if `template_name` is omitted.
+
+**MCP tool**: `apply_template(file_path, template_name?, password?, dry_run?)`
+**CLI**: `finkit apply-template FILE_PATH [--template NAME] [--password PASS] [--dry-run]`
+
+### list_templates
+
+List all saved document templates.
+
+**MCP tool**: `list_templates(institution?)`
+**CLI**: `finkit list-templates [--institution INST]`
+
+### delete_template
+
+Delete a document template.
+
+**MCP tool**: `delete_template(name)`
+**CLI**: `finkit delete-template NAME`

@@ -66,7 +66,7 @@ def categorize_transactions(
         return transactions
 
     for txn in transactions:
-        text = txn.payee or txn.narration or ""
+        text = txn.normalized_payee or txn.payee or txn.narration or ""
         if not text:
             continue
         for posting in txn.postings:

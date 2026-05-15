@@ -47,8 +47,9 @@ Immutable transaction headers. Linked to postings for the double-entry detail.
 | `id` | INTEGER | PRIMARY KEY | Auto-increment ID |
 | `uuid` | TEXT | NOT NULL, UNIQUE | 8-char hex for stable human-readable identification |
 | `date` | TEXT | NOT NULL | Transaction date (YYYY-MM-DD) |
-| `payee` | TEXT | | Payee name |
+| `payee` | TEXT | | Raw payee name from the source |
 | `narration` | TEXT | | Free-text description |
+| `normalized_payee` | TEXT | | Canonical payee name (set by normalization rules) |
 | `status` | TEXT | DEFAULT 'cleared' | pending, cleared, reconciled |
 | `source_file_id` | INTEGER | FK -> source_files | Link to the imported file, if any |
 | `raw_extraction_id` | INTEGER | FK -> raw_extractions | Link to the raw parsed row |
@@ -593,4 +594,51 @@ SELECT year, SUM(CAST(total_gain_loss AS REAL)) AS total
 FROM s_yearly_capital_gains
 WHERE currency = 'USD'
 GROUP BY year ORDER BY year;
+```
+
+---
+
+## payee_normalization_rules
+
+Rules for normalizing raw bank payees to canonical names.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | INTEGER | PRIMARY KEY | |
+| `pattern` | TEXT | NOT NULL | Pattern to match in raw payee |
+| `pattern_type` | TEXT | DEFAULT 'substring' | Match type: substring, regex, exact |
+| `canonical_name` | TEXT | NOT NULL | Clean canonical name |
+| `priority` | INTEGER | DEFAULT 0 | Higher = checked first |
+| `created_at` | TEXT | NOT NULL | ISO timestamp |
+
+```sql
+-- List all normalization rules
+SELECT * FROM payee_normalization_rules ORDER BY priority DESC;
+
+-- Find rules matching a payee
+SELECT * FROM payee_normalization_rules
+WHERE 'ACH Deposit META 4100' LIKE '%' || pattern || '%';
+```
+
+## document_templates
+
+Templates for automated document extraction (learn once, apply forever).
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | INTEGER | PRIMARY KEY | |
+| `name` | TEXT | NOT NULL UNIQUE | Template identifier |
+| `institution` | TEXT | | Financial institution |
+| `document_type` | TEXT | NOT NULL | payslip, bank_statement, cc_statement, etc. |
+| `match_keywords` | TEXT | NOT NULL | JSON array of identification keywords |
+| `template_json` | TEXT | NOT NULL | JSON extraction patterns (mode, fields/sections) |
+| `account_mapping` | TEXT | | JSON field-to-account mapping |
+| `created_at` | TEXT | NOT NULL | ISO timestamp |
+| `last_used_at` | TEXT | | Last template application timestamp |
+| `use_count` | INTEGER | DEFAULT 0 | Number of times applied |
+
+```sql
+-- List templates by usage
+SELECT name, institution, document_type, use_count
+FROM document_templates ORDER BY use_count DESC;
 ```

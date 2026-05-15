@@ -23,6 +23,9 @@ finkit.toml
 *.ofx
 *.qfx
 *.qif
+*.pdf
+*.xlsx
+*.xls
 
 # IDE / tooling
 .pytest_cache/
